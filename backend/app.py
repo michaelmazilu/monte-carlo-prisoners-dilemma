@@ -10,19 +10,29 @@ CORS(app)  # Enable CORS for frontend integration
 @app.route("/")
 def home():
     return """
-    <h1>Monte Carlo Prisoner's Dilemma Simulator</h1>
+    <h1>🎯 Monte Carlo Prisoner's Dilemma Simulator</h1>
     <p>Welcome to the Prisoner's Dilemma simulation API!</p>
     <h2>Available Endpoints:</h2>
     <ul>
-        <li><strong>POST /simulate</strong> - Run a Monte Carlo simulation</li>
+        <li><strong>POST /simulate</strong> - Run a single Monte Carlo simulation</li>
+        <li><strong>POST /parameter_sweep</strong> - Run 10,000 experiments (100x100 grid)</li>
+        <li><strong>POST /batch_simulate</strong> - Run multiple custom simulations</li>
+        <li><strong>GET /strategies</strong> - Get available strategy types</li>
+    </ul>
+    <h2>Parameter Sweep Experiment:</h2>
+    <p>Run comprehensive analysis with:</p>
+    <ul>
+        <li>Player 1: 100% → 0% cooperation (1% steps)</li>
+        <li>Player 2: 0% → 100% cooperation (1% steps)</li>
+        <li>100 rounds per configuration</li>
+        <li>Total: 10,000 experiments</li>
     </ul>
     <h2>How to use:</h2>
-    <p>Send a POST request to <code>/simulate</code> with JSON data:</p>
+    <p>Send a POST request to <code>/parameter_sweep</code> with JSON data:</p>
     <pre>
 {
-    "player1_prob": 0.5,
-    "player2_prob": 0.5,
-    "rounds": 1000
+    "rounds_per_config": 100,
+    "step_size": 0.01
 }
     </pre>
     """
@@ -137,6 +147,62 @@ def get_strategies():
         "always_defect": "Always defect (Always betray)"
     }
     return jsonify(strategies)
+
+@app.route("/parameter_sweep", methods=["POST"])
+def parameter_sweep():
+    """Run comprehensive parameter sweep: 100x100 grid of cooperation probabilities"""
+    try:
+        data = request.json
+        rounds_per_config = data.get("rounds_per_config", 100)
+        step_size = data.get("step_size", 0.01)  # 1% steps
+        
+        # Player 1: 100% → 0% cooperation (decreasing)
+        # Player 2: 0% → 100% cooperation (increasing)
+        p1_probs = torch.linspace(1.0, 0.0, int(1.0/step_size) + 1)
+        p2_probs = torch.linspace(0.0, 1.0, int(1.0/step_size) + 1)
+        
+        results = []
+        total_configs = len(p1_probs) * len(p2_probs)
+        
+        print(f"Running {total_configs} configurations with {rounds_per_config} rounds each...")
+        
+        for i, p1 in enumerate(p1_probs):
+            for j, p2 in enumerate(p2_probs):
+                # Run simulation
+                result = run_monte_carlo_simulation(
+                    p1.item(), p2.item(), rounds_per_config, 
+                    "probabilistic", "probabilistic"
+                )
+                
+                # Add configuration info
+                result.update({
+                    "p1_prob": p1.item(),
+                    "p2_prob": p2.item(),
+                    "config_id": i * len(p2_probs) + j,
+                    "total_configs": total_configs
+                })
+                
+                results.append(result)
+                
+                # Progress indicator
+                if (i * len(p2_probs) + j) % 1000 == 0:
+                    print(f"Completed {i * len(p2_probs) + j}/{total_configs} configurations")
+        
+        print(f"Parameter sweep complete! Processed {total_configs} configurations.")
+        
+        return jsonify({
+            "results": results,
+            "summary": {
+                "total_configurations": total_configs,
+                "rounds_per_config": rounds_per_config,
+                "step_size": step_size,
+                "p1_range": [p1_probs[0].item(), p1_probs[-1].item()],
+                "p2_range": [p2_probs[0].item(), p2_probs[-1].item()]
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({"error": f"Parameter sweep failed: {str(e)}"}), 500
 
 @app.route("/batch_simulate", methods=["POST"])
 def batch_simulate():

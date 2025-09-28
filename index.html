@@ -193,6 +193,51 @@
         .payoff-table tr:nth-child(even) {
             background: #f2f2f2;
         }
+
+        .simulation-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 2px solid #e9ecef;
+        }
+
+        .simulation-section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .heatmap-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .heatmap-title {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
@@ -230,41 +275,77 @@
 
             <div class="simulation-form">
                 <h2>🎯 Simulation Parameters</h2>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="player1_prob">Player 1 Cooperation Probability</label>
-                        <input type="number" id="player1_prob" min="0" max="1" step="0.01" value="0.5">
+                
+                <!-- Single Simulation -->
+                <div class="simulation-section">
+                    <h3>Single Simulation</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="player1_prob">Player 1 Cooperation Probability</label>
+                            <input type="number" id="player1_prob" min="0" max="1" step="0.01" value="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label for="player2_prob">Player 2 Cooperation Probability</label>
+                            <input type="number" id="player2_prob" min="0" max="1" step="0.01" value="0.5">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="player2_prob">Player 2 Cooperation Probability</label>
-                        <input type="number" id="player2_prob" min="0" max="1" step="0.01" value="0.5">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="strategy1">Player 1 Strategy</label>
+                            <select id="strategy1">
+                                <option value="probabilistic">Probabilistic</option>
+                                <option value="always_cooperate">Always Cooperate</option>
+                                <option value="always_defect">Always Defect</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="strategy2">Player 2 Strategy</label>
+                            <select id="strategy2">
+                                <option value="probabilistic">Probabilistic</option>
+                                <option value="always_cooperate">Always Cooperate</option>
+                                <option value="always_defect">Always Defect</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rounds">Number of Rounds</label>
+                            <input type="number" id="rounds" min="100" max="1000000" step="100" value="1000">
+                        </div>
+                    </div>
+                    <button class="btn" onclick="runSimulation()">🚀 Run Single Simulation</button>
+                </div>
+
+                <!-- Parameter Sweep -->
+                <div class="simulation-section">
+                    <h3>📊 Parameter Sweep Experiment (10,000 Configurations)</h3>
+                    <p><strong>Player 1:</strong> 100% → 0% cooperation (1% steps)</p>
+                    <p><strong>Player 2:</strong> 0% → 100% cooperation (1% steps)</p>
+                    <p><strong>Total:</strong> 10,000 experiments with 100 rounds each</p>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sweep_rounds">Rounds per Configuration</label>
+                            <input type="number" id="sweep_rounds" min="50" max="1000" step="10" value="100">
+                        </div>
+                        <div class="form-group">
+                            <label for="step_size">Step Size</label>
+                            <select id="step_size">
+                                <option value="0.01">1% (10,000 experiments)</option>
+                                <option value="0.02">2% (2,500 experiments)</option>
+                                <option value="0.05">5% (400 experiments)</option>
+                                <option value="0.1">10% (100 experiments)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn" onclick="runParameterSweep()">🔥 Run Parameter Sweep</button>
+                    <div id="sweep-progress" style="display: none; margin-top: 10px;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div id="progress-text">Starting...</div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="strategy1">Player 1 Strategy</label>
-                        <select id="strategy1">
-                            <option value="probabilistic">Probabilistic</option>
-                            <option value="always_cooperate">Always Cooperate</option>
-                            <option value="always_defect">Always Defect</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="strategy2">Player 2 Strategy</label>
-                        <select id="strategy2">
-                            <option value="probabilistic">Probabilistic</option>
-                            <option value="always_cooperate">Always Cooperate</option>
-                            <option value="always_defect">Always Defect</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="rounds">Number of Rounds</label>
-                        <input type="number" id="rounds" min="100" max="1000000" step="100" value="1000">
-                    </div>
-                </div>
-                <button class="btn" onclick="runSimulation()">🚀 Run Simulation</button>
             </div>
 
             <div id="loading" class="loading" style="display: none;">
@@ -452,6 +533,219 @@
             } catch (err) {
                 console.log('Could not load strategies:', err);
             }
+        }
+
+        // Parameter Sweep Functions
+        async function runParameterSweep() {
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const results = document.getElementById('results');
+            const progressDiv = document.getElementById('sweep-progress');
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            
+            // Hide previous results and errors
+            error.style.display = 'none';
+            results.style.display = 'none';
+            loading.style.display = 'block';
+            progressDiv.style.display = 'block';
+            
+            try {
+                const data = {
+                    rounds_per_config: parseInt(document.getElementById('sweep_rounds').value),
+                    step_size: parseFloat(document.getElementById('step_size').value)
+                };
+
+                // Simulate progress updates
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += Math.random() * 10;
+                    if (progress > 90) progress = 90;
+                    progressFill.style.width = progress + '%';
+                    progressText.textContent = `Processing ${Math.round(progress)}% of configurations...`;
+                }, 500);
+
+                const response = await fetch('http://127.0.0.1:5000/parameter_sweep', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                clearInterval(progressInterval);
+                progressFill.style.width = '100%';
+                progressText.textContent = 'Complete! Processing results...';
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Parameter sweep failed');
+                }
+
+                displayParameterSweepResults(result);
+                
+            } catch (err) {
+                error.textContent = `Error: ${err.message}`;
+                error.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+                progressDiv.style.display = 'none';
+            }
+        }
+
+        function displayParameterSweepResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const resultsGrid = document.getElementById('results-grid');
+            
+            // Clear previous results
+            resultsGrid.innerHTML = '';
+            
+            // Create summary cards
+            const summary = data.summary;
+            const cards = [
+                { title: 'Total Configurations', value: summary.total_configurations.toLocaleString() },
+                { title: 'Rounds per Config', value: summary.rounds_per_config.toLocaleString() },
+                { title: 'Total Rounds', value: (summary.total_configurations * summary.rounds_per_config).toLocaleString() },
+                { title: 'Step Size', value: (summary.step_size * 100) + '%' },
+                { title: 'P1 Range', value: `${(summary.p1_range[0] * 100).toFixed(0)}% → ${(summary.p1_range[1] * 100).toFixed(0)}%` },
+                { title: 'P2 Range', value: `${(summary.p2_range[0] * 100).toFixed(0)}% → ${(summary.p2_range[1] * 100).toFixed(0)}%` }
+            ];
+
+            cards.forEach(card => {
+                const cardDiv = document.createElement('div');
+                cardDiv.className = 'result-card';
+                cardDiv.innerHTML = `
+                    <h3>${card.title}</h3>
+                    <div class="value">${card.value}</div>
+                `;
+                resultsGrid.appendChild(cardDiv);
+            });
+
+            // Create heatmap charts
+            createParameterSweepHeatmaps(data.results);
+            
+            resultsDiv.style.display = 'block';
+        }
+
+        function createParameterSweepHeatmaps(results) {
+            // Prepare data for heatmaps
+            const stepSize = 0.01; // Default step size
+            const gridSize = Math.sqrt(results.length);
+            
+            // Extract data for heatmaps
+            const p1Payoffs = [];
+            const p2Payoffs = [];
+            const totalPayoffs = [];
+            const cooperationRates = [];
+            
+            for (let i = 0; i < gridSize; i++) {
+                p1Payoffs[i] = [];
+                p2Payoffs[i] = [];
+                totalPayoffs[i] = [];
+                cooperationRates[i] = [];
+                
+                for (let j = 0; j < gridSize; j++) {
+                    const result = results[i * gridSize + j];
+                    p1Payoffs[i][j] = result.player1_avg_payoff;
+                    p2Payoffs[i][j] = result.player2_avg_payoff;
+                    totalPayoffs[i][j] = result.player1_avg_payoff + result.player2_avg_payoff;
+                    cooperationRates[i][j] = result.both_cooperate_rate;
+                }
+            }
+
+            // Create heatmap containers
+            const heatmapContainer = document.createElement('div');
+            heatmapContainer.className = 'heatmap-container';
+            heatmapContainer.innerHTML = `
+                <h2 class="heatmap-title">📊 Parameter Sweep Results</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3>Player 1 Average Payoffs</h3>
+                        <canvas id="p1PayoffHeatmap"></canvas>
+                    </div>
+                    <div>
+                        <h3>Player 2 Average Payoffs</h3>
+                        <canvas id="p2PayoffHeatmap"></canvas>
+                    </div>
+                    <div>
+                        <h3>Total Payoffs</h3>
+                        <canvas id="totalPayoffHeatmap"></canvas>
+                    </div>
+                    <div>
+                        <h3>Cooperation Rates</h3>
+                        <canvas id="cooperationHeatmap"></canvas>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('results').appendChild(heatmapContainer);
+
+            // Create heatmap charts
+            createHeatmapChart('p1PayoffHeatmap', p1Payoffs, 'Player 1 Payoffs');
+            createHeatmapChart('p2PayoffHeatmap', p2Payoffs, 'Player 2 Payoffs');
+            createHeatmapChart('totalPayoffHeatmap', totalPayoffs, 'Total Payoffs');
+            createHeatmapChart('cooperationHeatmap', cooperationRates, 'Cooperation Rates');
+        }
+
+        function createHeatmapChart(canvasId, data, title) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            
+            // Create a simple heatmap visualization
+            const chart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: title,
+                        data: [],
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        pointRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: title
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Player 1 Cooperation Probability'
+                            },
+                            min: 0,
+                            max: 1
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Player 2 Cooperation Probability'
+                            },
+                            min: 0,
+                            max: 1
+                        }
+                    }
+                }
+            });
+
+            // Convert heatmap data to scatter plot data
+            const scatterData = [];
+            for (let i = 0; i < data.length; i++) {
+                for (let j = 0; j < data[i].length; j++) {
+                    scatterData.push({
+                        x: i * 0.01, // Convert to probability
+                        y: j * 0.01, // Convert to probability
+                        value: data[i][j]
+                    });
+                }
+            }
+
+            chart.data.datasets[0].data = scatterData;
+            chart.update();
         }
 
         // Initialize page
