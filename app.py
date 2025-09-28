@@ -16,8 +16,13 @@ simulation_queue = queue.Queue()
 current_simulation = None
 simulation_thread = None
 
-def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strategy2="probabilistic"):
+def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strategy2="probabilistic", random_seed=None):
     """Run Monte Carlo simulation for Prisoner's Dilemma"""
+    
+    # Set random seed if provided
+    if random_seed is not None:
+        torch.manual_seed(random_seed)
+        np.random.seed(random_seed)
     
     # Generate actions based on strategies
     if strategy1 == "probabilistic":
@@ -65,7 +70,13 @@ def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strate
         "p1_defect_p2_coop_rate": float((~p1_actions & p2_actions).sum()) / rounds,
         "total_rounds": rounds,
         "strategy1": strategy1,
-        "strategy2": strategy2
+        "strategy2": strategy2,
+        "parameters": {
+            "player1_prob": p1,
+            "player2_prob": p2,
+            "rounds": rounds,
+            "random_seed": random_seed
+        }
     }
     
     return result
@@ -209,6 +220,88 @@ def home():
             padding: 40px;
             margin-bottom: 40px;
             text-align: left;
+        }
+
+        .parameter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin: 32px 0;
+        }
+
+        .parameter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .parameter-group label {
+            font-weight: 500;
+            color: #374151;
+            font-size: 0.875rem;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slider {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: #E5E7EB;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #111827;
+            cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #111827;
+            cursor: pointer;
+            border: none;
+        }
+
+        .slider-container span {
+            min-width: 60px;
+            text-align: right;
+            font-weight: 500;
+            color: #111827;
+            font-size: 0.875rem;
+        }
+
+        .select-input, .number-input {
+            padding: 8px 12px;
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: white;
+        }
+
+        .select-input:focus, .number-input:focus {
+            outline: none;
+            border-color: #111827;
+            box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+            flex-wrap: wrap;
         }
 
         .simulation-controls h2 {
@@ -457,15 +550,62 @@ def home():
         </div>
 
         <div class="simulation-controls">
-            <h2>Start Your Experiment</h2>
-            <p>Run a comprehensive parameter sweep:</p>
-            <ul>
-                <li><strong>Player 1:</strong> 100% → 0% cooperation (1% steps)</li>
-                <li><strong>Player 2:</strong> 0% → 100% cooperation (1% steps)</li>
-                <li><strong>Total:</strong> 10,000 experiments with 100 rounds each</li>
-            </ul>
-            <button class="btn btn-primary" id="startBtn" onclick="startSimulation()">Start Simulation</button>
-            <button class="btn btn-outline" id="stopBtn" onclick="stopSimulation()" disabled>Stop</button>
+            <h2>Custom Simulation Parameters</h2>
+            <p>Configure your simulation parameters:</p>
+            
+            <div class="parameter-grid">
+                <div class="parameter-group">
+                    <label for="player1_prob">Player 1 Cooperation Probability</label>
+                    <div class="slider-container">
+                        <input type="range" id="player1_prob" min="0" max="100" value="50" class="slider">
+                        <span id="player1_value">50%</span>
+                    </div>
+                </div>
+                
+                <div class="parameter-group">
+                    <label for="player2_prob">Player 2 Cooperation Probability</label>
+                    <div class="slider-container">
+                        <input type="range" id="player2_prob" min="0" max="100" value="50" class="slider">
+                        <span id="player2_value">50%</span>
+                    </div>
+                </div>
+                
+                <div class="parameter-group">
+                    <label for="rounds">Number of Rounds</label>
+                    <div class="slider-container">
+                        <input type="range" id="rounds" min="100" max="100000" value="1000" step="100" class="slider">
+                        <span id="rounds_value">1,000</span>
+                    </div>
+                </div>
+                
+                <div class="parameter-group">
+                    <label for="strategy1">Player 1 Strategy</label>
+                    <select id="strategy1" class="select-input">
+                        <option value="probabilistic">Probabilistic</option>
+                        <option value="always_cooperate">Always Cooperate</option>
+                        <option value="always_defect">Always Defect</option>
+                    </select>
+                </div>
+                
+                <div class="parameter-group">
+                    <label for="strategy2">Player 2 Strategy</label>
+                    <select id="strategy2" class="select-input">
+                        <option value="probabilistic">Probabilistic</option>
+                        <option value="always_cooperate">Always Cooperate</option>
+                        <option value="always_defect">Always Defect</option>
+                    </select>
+                </div>
+                
+                <div class="parameter-group">
+                    <label for="random_seed">Random Seed (optional)</label>
+                    <input type="number" id="random_seed" placeholder="Leave empty for random" class="number-input">
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn btn-primary" id="runCustomBtn" onclick="runCustomSimulation()">Run Custom Simulation</button>
+                <button class="btn btn-outline" id="runSweepBtn" onclick="startSimulation()">Run Parameter Sweep (10,000 experiments)</button>
+            </div>
         </div>
 
         <div class="progress-container" id="progressContainer">
@@ -536,16 +676,114 @@ def home():
         let startTime = null;
         let charts = {};
 
-        function startSimulation() {
-            const startBtn = document.getElementById('startBtn');
-            const stopBtn = document.getElementById('stopBtn');
+        // Initialize parameter controls
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set up slider value updates
+            const player1Slider = document.getElementById('player1_prob');
+            const player2Slider = document.getElementById('player2_prob');
+            const roundsSlider = document.getElementById('rounds');
+            
+            const player1Value = document.getElementById('player1_value');
+            const player2Value = document.getElementById('player2_value');
+            const roundsValue = document.getElementById('rounds_value');
+            
+            player1Slider.addEventListener('input', () => {
+                player1Value.textContent = player1Slider.value + '%';
+            });
+            
+            player2Slider.addEventListener('input', () => {
+                player2Value.textContent = player2Slider.value + '%';
+            });
+            
+            roundsSlider.addEventListener('input', () => {
+                const value = parseInt(roundsSlider.value);
+                roundsValue.textContent = value.toLocaleString();
+            });
+        });
+
+        function runCustomSimulation() {
+            const runCustomBtn = document.getElementById('runCustomBtn');
             const progressContainer = document.getElementById('progressContainer');
             const statsGrid = document.getElementById('statsGrid');
             const chartsContainer = document.getElementById('chartsContainer');
             const histogramContainer = document.getElementById('histogramContainer');
             
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
+            // Get parameter values
+            const player1Prob = parseFloat(document.getElementById('player1_prob').value) / 100;
+            const player2Prob = parseFloat(document.getElementById('player2_prob').value) / 100;
+            const rounds = parseInt(document.getElementById('rounds').value);
+            const strategy1 = document.getElementById('strategy1').value;
+            const strategy2 = document.getElementById('strategy2').value;
+            const randomSeed = document.getElementById('random_seed').value;
+            
+            // Validate parameters
+            if (rounds < 100 || rounds > 100000) {
+                alert('Number of rounds must be between 100 and 100,000');
+                return;
+            }
+            
+            runCustomBtn.disabled = true;
+            progressContainer.style.display = 'block';
+            statsGrid.style.display = 'flex';
+            chartsContainer.style.display = 'grid';
+            histogramContainer.style.display = 'grid';
+            
+            // Show loading state
+            document.getElementById('progressText').textContent = 'Running custom simulation...';
+            document.getElementById('progressFill').style.width = '0%';
+            
+            // Prepare request data
+            const requestData = {
+                player1_prob: player1Prob,
+                player2_prob: player2Prob,
+                rounds: rounds,
+                strategy1: strategy1,
+                strategy2: strategy2
+            };
+            
+            if (randomSeed) {
+                requestData.random_seed = parseInt(randomSeed);
+            }
+            
+            // Send request to backend
+            fetch('/simulate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Update progress to 100%
+                document.getElementById('progressFill').style.width = '100%';
+                document.getElementById('progressText').textContent = 'Simulation completed!';
+                
+                // Display results
+                displayCustomResults(data);
+                
+                runCustomBtn.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Simulation failed: ' + error.message);
+                runCustomBtn.disabled = false;
+                progressContainer.style.display = 'none';
+            });
+        }
+
+        function startSimulation() {
+            const runSweepBtn = document.getElementById('runSweepBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const statsGrid = document.getElementById('statsGrid');
+            const chartsContainer = document.getElementById('chartsContainer');
+            const histogramContainer = document.getElementById('histogramContainer');
+            
+            runSweepBtn.disabled = true;
             progressContainer.style.display = 'block';
             statsGrid.style.display = 'flex';
             chartsContainer.style.display = 'grid';
@@ -774,6 +1012,182 @@ def home():
             p1TotalCoins: [], // Total coins for each cooperation level
             p2TotalCoins: []  // Total coins for each cooperation level
         };
+
+        function displayCustomResults(result) {
+            // Update statistics display
+            document.getElementById('completedCount').textContent = '1';
+            document.getElementById('totalCount').textContent = '1';
+            document.getElementById('progressPercent').textContent = '100%';
+            
+            // Create single result charts
+            createCustomCharts(result);
+        }
+
+        function createCustomCharts(result) {
+            // Clear existing charts
+            if (charts.p1) charts.p1.destroy();
+            if (charts.p2) charts.p2.destroy();
+            if (charts.total) charts.total.destroy();
+            if (charts.coop) charts.coop.destroy();
+            
+            // Create bar chart for payoffs
+            charts.p1 = createBarChart('p1Chart', 
+                ['Player 1', 'Player 2'], 
+                [result.player1_avg_payoff, result.player2_avg_payoff],
+                'Average Payoffs by Player',
+                ['#6B7280', '#9CA3AF']
+            );
+            
+            // Create pie chart for cooperation outcomes
+            charts.coop = createPieChart('coopChart',
+                ['Both Cooperate', 'Both Defect', 'P1 Coop, P2 Defect', 'P1 Defect, P2 Coop'],
+                [
+                    result.both_cooperate_rate * 100,
+                    result.both_defect_rate * 100,
+                    result.p1_coop_p2_defect_rate * 100,
+                    result.p1_defect_p2_coop_rate * 100
+                ],
+                'Outcome Distribution (%)',
+                ['#10B981', '#EF4444', '#F59E0B', '#8B5CF6']
+            );
+            
+            // Create line chart for total payoff
+            charts.total = createLineChart('totalChart',
+                ['Total Payoff'],
+                [result.player1_avg_payoff + result.player2_avg_payoff],
+                'Total Average Payoff',
+                '#6B7280'
+            );
+            
+            // Create cooperation rate chart
+            charts.p2 = createLineChart('p2Chart',
+                ['Cooperation Rate'],
+                [result.both_cooperate_rate * 100],
+                'Mutual Cooperation Rate (%)',
+                '#9CA3AF'
+            );
+        }
+
+        function createBarChart(canvasId, labels, data, title, colors) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors,
+                        borderColor: colors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: title,
+                            font: { family: 'Inter, system-ui, sans-serif', size: 14, weight: '500' },
+                            color: '#374151'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280', font: { family: 'Inter, system-ui, sans-serif', size: 11 } }
+                        },
+                        x: {
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280', font: { family: 'Inter, system-ui, sans-serif', size: 11 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createPieChart(canvasId, labels, data, title, colors) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors,
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20,
+                                font: { family: 'Inter, system-ui, sans-serif', size: 12, weight: '500' },
+                                color: '#374151'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: title,
+                            font: { family: 'Inter, system-ui, sans-serif', size: 14, weight: '500' },
+                            color: '#374151'
+                        }
+                    }
+                }
+            });
+        }
+
+        function createLineChart(canvasId, labels, data, title, color) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: color + '15',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        borderWidth: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: title,
+                            font: { family: 'Inter, system-ui, sans-serif', size: 14, weight: '500' },
+                            color: '#374151'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280', font: { family: 'Inter, system-ui, sans-serif', size: 11 } }
+                        },
+                        x: {
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280', font: { family: 'Inter, system-ui, sans-serif', size: 11 } }
+                        }
+                    }
+                }
+            });
+        }
 
         function updateChartsRealTime(result, completed) {
             // Add new data point
@@ -1063,6 +1477,36 @@ def home():
 </body>
 </html>
     """)
+
+@app.route('/simulate', methods=['POST'])
+def simulate():
+    """Run a single Monte Carlo simulation with custom parameters"""
+    try:
+        if not request.json:
+            return jsonify({"error": "No JSON data provided"}), 400
+        
+        data = request.json
+        p1 = data.get("player1_prob", 0.5)
+        p2 = data.get("player2_prob", 0.5)
+        rounds = data.get("rounds", 1000)
+        strategy1 = data.get("strategy1", "probabilistic")
+        strategy2 = data.get("strategy2", "probabilistic")
+        random_seed = data.get("random_seed", None)
+
+        # Input validation
+        if not (0 <= p1 <= 1) or not (0 <= p2 <= 1):
+            return jsonify({"error": "Probabilities must be between 0 and 1"}), 400
+        
+        if rounds <= 0 or rounds > 1000000:
+            return jsonify({"error": "Rounds must be between 1 and 1,000,000"}), 400
+
+        # Run Monte Carlo simulation
+        result = run_monte_carlo_simulation(p1, p2, rounds, strategy1, strategy2, random_seed)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
 
 @app.route('/start_simulation', methods=['POST'])
 def start_simulation():
