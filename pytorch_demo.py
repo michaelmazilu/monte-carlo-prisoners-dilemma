@@ -187,7 +187,7 @@ def demo_device_info():
 
 def main():
     """Run all demos"""
-    print("🎯 PyTorch Prisoner's Dilemma Demo")
+    print("PyTorch Prisoner's Dilemma Demo")
     print("=" * 50)
     
     # Run demos
