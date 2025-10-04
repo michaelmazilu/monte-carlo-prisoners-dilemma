@@ -136,8 +136,7 @@ def run_parameter_sweep_background(rounds_per_config, step_size, progress_callba
                     }
                 })
                 
-                # Small delay to make it visible
-                time.sleep(0.01)
+                # Removed artificial delay to maximize performance
         
         # Send completion
         progress_callback({
@@ -852,11 +851,6 @@ def home():
 <body>
     <div class="container">
         <div class="header">
-            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle">
-                <svg class="theme-icon" id="themeIcon" viewBox="0 0 24 24">
-                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                </svg>
-            </button>
             <h1>Monte Carlo Prisoner's Dilemma Simulator</h1>
             <p>Real-time parameter sweep with 10,000 experiments</p>
         </div>
@@ -1166,6 +1160,9 @@ def home():
             const chartsContainer = document.getElementById('chartsContainer');
             const histogramContainer = document.getElementById('histogramContainer');
             
+            // Use the selected rounds from the slider for rounds per configuration
+            const roundsPerConfig = parseInt(document.getElementById('rounds').value);
+            
             runSweepBtn.disabled = true;
             progressContainer.style.display = 'block';
             statsGrid.style.display = 'flex';
@@ -1203,8 +1200,7 @@ def home():
                     addUpdate('Connection timeout - resetting', 'error');
                     
                     // Reset UI
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('runSweepBtn').disabled = false;
                     
                     if (eventSource) {
                         eventSource.close();
@@ -1230,8 +1226,7 @@ def home():
                 addUpdate('Connection error occurred', 'error');
                 
                 // Reset UI state
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('runSweepBtn').disabled = false;
                 
                 // Close connection
                 if (eventSource) {
@@ -1247,7 +1242,7 @@ def home():
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    rounds_per_config: 100,
+                    rounds_per_config: roundsPerConfig,
                     step_size: 0.01
                 })
             }).catch(error => {
@@ -1264,8 +1259,7 @@ def home():
             
             fetch('/stop_simulation', { method: 'POST' });
             
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('runSweepBtn').disabled = false;
             
             addUpdate('Simulation stopped by user', 'error');
         }
@@ -1293,8 +1287,7 @@ def home():
                 addUpdate('Error processing update: ' + error.message, 'error');
                 
                 // Reset UI state on error
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('runSweepBtn').disabled = false;
                 
                 if (eventSource) {
                     eventSource.close();
@@ -1336,8 +1329,7 @@ def home():
         function handleCompletion(data) {
             addUpdate('Simulation completed successfully!', 'completed');
             
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('runSweepBtn').disabled = false;
             
             if (eventSource) {
                 eventSource.close();
@@ -1352,8 +1344,7 @@ def home():
         function handleError(data) {
             addUpdate('Error: ' + data.error, 'error');
             
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('runSweepBtn').disabled = false;
             
             if (eventSource) {
                 eventSource.close();
