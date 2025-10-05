@@ -6,160 +6,197 @@ import json
 import time
 import threading
 import queue
-from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-# Global variables for real-time updates
-simulation_queue = queue.Queue()
-current_simulation = None
-simulation_thread = None
+# Globals for SSE single-run simulation
+run_queue = queue.Queue()
+run_thread = None
+current_run = None
 
-def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strategy2="probabilistic", random_seed=None):
-    """Run Monte Carlo simulation for Prisoner's Dilemma"""
-    
-    # Set random seed if provided
-    if random_seed is not None:
-        torch.manual_seed(random_seed)
-        np.random.seed(random_seed)
-    
-    # Generate actions based on strategies
-    if strategy1 == "probabilistic":
-        p1_actions = torch.rand(rounds) < p1
-    elif strategy1 == "always_cooperate":
-        p1_actions = torch.ones(rounds, dtype=torch.bool)
-    elif strategy1 == "always_defect":
-        p1_actions = torch.zeros(rounds, dtype=torch.bool)
-    else:
-        p1_actions = torch.rand(rounds) < p1
-    
-    if strategy2 == "probabilistic":
-        p2_actions = torch.rand(rounds) < p2
-    elif strategy2 == "always_cooperate":
-        p2_actions = torch.ones(rounds, dtype=torch.bool)
-    elif strategy2 == "always_defect":
-        p2_actions = torch.zeros(rounds, dtype=torch.bool)
-    else:
-        p2_actions = torch.rand(rounds) < p2
+def run_monte_carlo_simulation(p1_defect, p2_defect, rounds):
+    """Run Monte Carlo simulation using defection probabilities.
+
+    p1_defect/p2_defect are probabilities in [0, 1] that each player defects on a round.
+    We model cooperate as the complement of defect.
+    """
+
+    # Handle zero rounds safely
+    if rounds == 0:
+        return {
+            "player1_avg_payoff": 0.0,
+            "player2_avg_payoff": 0.0,
+            "player1_coop_rate": 0.0,
+            "player2_coop_rate": 0.0,
+            "both_cooperate_rate": 0.0,
+            "both_defect_rate": 0.0,
+            "p1_coop_p2_defect_rate": 0.0,
+            "p1_defect_p2_coop_rate": 0.0,
+            "total_rounds": 0,
+            "parameters": {
+                "player1_defect_prob": p1_defect,
+                "player2_defect_prob": p2_defect,
+                "rounds": 0
+            }
+        }
+
+    # Generate cooperate/defect actions
+    p1_defects = torch.rand(rounds) < p1_defect
+    p2_defects = torch.rand(rounds) < p2_defect
+    p1_coops = ~p1_defects
+    p2_coops = ~p2_defects
 
     # Payoff matrix calculation
     payoffs = torch.zeros((rounds, 2))
-    
+
     payoffs[:, 0] = torch.where(
-        p1_actions & p2_actions, 3,
-        torch.where(p1_actions & ~p2_actions, 0,
-                   torch.where(~p1_actions & p2_actions, 5, 1))
+        p1_coops & p2_coops, 3,
+        torch.where(p1_coops & ~p2_coops, 0,
+                   torch.where(~p1_coops & p2_coops, 5, 1))
     )
-    
+
     payoffs[:, 1] = torch.where(
-        p1_actions & p2_actions, 3,
-        torch.where(p1_actions & ~p2_actions, 5,
-                   torch.where(~p1_actions & p2_actions, 0, 1))
+        p1_coops & p2_coops, 3,
+        torch.where(p1_coops & ~p2_coops, 5,
+                   torch.where(~p1_coops & p2_coops, 0, 1))
     )
 
     # Calculate statistics
     result = {
         "player1_avg_payoff": payoffs[:, 0].float().mean().item(),
         "player2_avg_payoff": payoffs[:, 1].float().mean().item(),
-        "player1_coop_rate": float(p1_actions.sum()) / rounds,
-        "player2_coop_rate": float(p2_actions.sum()) / rounds,
-        "both_cooperate_rate": float((p1_actions & p2_actions).sum()) / rounds,
-        "both_defect_rate": float((~p1_actions & ~p2_actions).sum()) / rounds,
-        "p1_coop_p2_defect_rate": float((p1_actions & ~p2_actions).sum()) / rounds,
-        "p1_defect_p2_coop_rate": float((~p1_actions & p2_actions).sum()) / rounds,
+        "player1_coop_rate": float(p1_coops.sum()) / rounds,
+        "player2_coop_rate": float(p2_coops.sum()) / rounds,
+        "both_cooperate_rate": float((p1_coops & p2_coops).sum()) / rounds,
+        "both_defect_rate": float((~p1_coops & ~p2_coops).sum()) / rounds,
+        "p1_coop_p2_defect_rate": float((p1_coops & ~p2_coops).sum()) / rounds,
+        "p1_defect_p2_coop_rate": float((~p1_coops & p2_coops).sum()) / rounds,
         "total_rounds": rounds,
-        "strategy1": strategy1,
-        "strategy2": strategy2,
         "parameters": {
-            "player1_prob": p1,
-            "player2_prob": p2,
-            "rounds": rounds,
-            "random_seed": random_seed
+            "player1_defect_prob": p1_defect,
+            "player2_defect_prob": p2_defect,
+            "rounds": rounds
         }
     }
-    
+
     return result
 
-def run_parameter_sweep_background(rounds_per_config, step_size, progress_callback):
-    """Run parameter sweep in background with progress updates"""
-    global current_simulation
-    
+
+def run_simulation_streaming(p1_defect, p2_defect, rounds, batch_size, progress_callback):
+    """Run simulation in batches using PyTorch and stream progress via callback."""
+    global current_run
     try:
-        # Player 1: 100% → 0% cooperation (decreasing)
-        # Player 2: 0% → 100% cooperation (increasing)
-        p1_probs = torch.linspace(1.0, 0.0, int(1.0/step_size) + 1)
-        p2_probs = torch.linspace(0.0, 1.0, int(1.0/step_size) + 1)
-        
-        results = []
-        total_configs = len(p1_probs) * len(p2_probs)
-        
-        current_simulation = {
+        current_run = {
             "status": "running",
-            "total_configs": total_configs,
-            "completed_configs": 0,
+            "rounds": rounds,
+            "completed": 0,
             "start_time": time.time(),
-            "results": []
         }
-        
-        for i, p1 in enumerate(p1_probs):
-            for j, p2 in enumerate(p2_probs):
-                # Run simulation
-                result = run_monte_carlo_simulation(
-                    p1.item(), p2.item(), rounds_per_config, 
-                    "probabilistic", "probabilistic"
-                )
-                
-                # Add configuration info
-                result.update({
-                    "p1_prob": p1.item(),
-                    "p2_prob": p2.item(),
-                    "config_id": i * len(p2_probs) + j,
-                    "total_configs": total_configs
-                })
-                
-                results.append(result)
-                current_simulation["completed_configs"] += 1
-                current_simulation["results"] = results
-                
-                # Send progress update
-                progress = (current_simulation["completed_configs"] / total_configs) * 100
-                progress_callback({
-                    "type": "progress",
-                    "progress": progress,
-                    "completed": current_simulation["completed_configs"],
-                    "total": total_configs,
-                    "current_config": {
-                        "p1_prob": p1.item(),
-                        "p2_prob": p2.item(),
-                        "result": result
-                    }
-                })
-                
-                # Removed artificial delay to maximize performance
-        
-        # Send completion
-        progress_callback({
-            "type": "complete",
-            "results": results,
-            "summary": {
-                "total_configurations": total_configs,
-                "rounds_per_config": rounds_per_config,
-                "step_size": step_size,
-                "p1_range": [p1_probs[0].item(), p1_probs[-1].item()],
-                "p2_range": [p2_probs[0].item(), p2_probs[-1].item()],
-                "execution_time": time.time() - current_simulation["start_time"]
+
+        if rounds == 0:
+            # Immediate completion
+            summary = run_monte_carlo_simulation(p1_defect, p2_defect, 0)
+            progress_callback({"type": "complete", "result": summary})
+            current_run["status"] = "completed"
+            return
+
+        # Accumulators
+        p1_total = 0.0
+        p2_total = 0.0
+        both_coop = 0
+        both_defect = 0
+        p1_coop_p2_defect = 0
+        p1_defect_p2_coop = 0
+
+        remaining = rounds
+        while remaining > 0 and current_run and current_run.get("status") == "running":
+            b = min(batch_size, remaining)
+
+            # Sample defects with PyTorch
+            p1_def = torch.rand(b) < p1_defect
+            p2_def = torch.rand(b) < p2_defect
+            p1_coop = ~p1_def
+            p2_coop = ~p2_def
+
+            # Outcomes counts
+            bc = (p1_coop & p2_coop).sum().item()
+            bd = ((~p1_coop) & (~p2_coop)).sum().item()
+            c_d = (p1_coop & (~p2_coop)).sum().item()
+            d_c = ((~p1_coop) & p2_coop).sum().item()
+
+            both_coop += int(bc)
+            both_defect += int(bd)
+            p1_coop_p2_defect += int(c_d)
+            p1_defect_p2_coop += int(d_c)
+
+            # Payoffs using vectorized torch.where
+            payoffs_p1 = torch.where(
+                p1_coop & p2_coop, torch.tensor(3.0),
+                torch.where(p1_coop & (~p2_coop), torch.tensor(0.0),
+                           torch.where((~p1_coop) & p2_coop, torch.tensor(5.0), torch.tensor(1.0)))
+            )
+            payoffs_p2 = torch.where(
+                p1_coop & p2_coop, torch.tensor(3.0),
+                torch.where(p1_coop & (~p2_coop), torch.tensor(5.0),
+                           torch.where((~p1_coop) & p2_coop, torch.tensor(0.0), torch.tensor(1.0)))
+            )
+
+            p1_total += float(payoffs_p1.sum().item())
+            p2_total += float(payoffs_p2.sum().item())
+
+            current_run["completed"] += b
+            remaining -= b
+
+            # Progress payload
+            completed = current_run["completed"]
+            p1_avg = p1_total / completed
+            p2_avg = p2_total / completed
+            total_avg = (p1_total + p2_total) / completed
+            progress = (completed / rounds) * 100.0
+
+            progress_callback({
+                "type": "progress",
+                "completed": completed,
+                "total": rounds,
+                "progress": progress,
+                "metrics": {
+                    "p1_avg": p1_avg,
+                    "p2_avg": p2_avg,
+                    "total_avg": total_avg,
+                    "both_cooperate": both_coop,
+                    "both_defect": both_defect,
+                    "p1_coop_p2_defect": p1_coop_p2_defect,
+                    "p1_defect_p2_coop": p1_defect_p2_coop
+                }
+            })
+
+        if current_run and current_run.get("status") == "running":
+            # Finalize
+            summary = {
+                "player1_avg_payoff": p1_total / rounds,
+                "player2_avg_payoff": p2_total / rounds,
+                "player1_coop_rate": both_coop / rounds + p1_coop_p2_defect / rounds,
+                "player2_coop_rate": both_coop / rounds + p1_defect_p2_coop / rounds,
+                "both_cooperate_rate": both_coop / rounds,
+                "both_defect_rate": both_defect / rounds,
+                "p1_coop_p2_defect_rate": p1_coop_p2_defect / rounds,
+                "p1_defect_p2_coop_rate": p1_defect_p2_coop / rounds,
+                "total_rounds": rounds,
+                "parameters": {
+                    "player1_defect_prob": p1_defect,
+                    "player2_defect_prob": p2_defect,
+                    "rounds": rounds
+                }
             }
-        })
-        
-        current_simulation["status"] = "completed"
-        
+            progress_callback({"type": "complete", "result": summary})
+            current_run["status"] = "completed"
     except Exception as e:
-        current_simulation["status"] = "error"
-        progress_callback({
-            "type": "error",
-            "error": str(e)
-        })
+        if current_run is not None:
+            current_run["status"] = "error"
+        progress_callback({"type": "error", "error": str(e)})
+
+# Sweep functionality removed
 
 @app.route("/")
 def home():
@@ -852,7 +889,7 @@ def home():
     <div class="container">
         <div class="header">
             <h1>Monte Carlo Prisoner's Dilemma Simulator</h1>
-            <p>Real-time parameter sweep with 10,000 experiments</p>
+            <p>Single-run simulation using defection probabilities</p>
         </div>
 
         <div class="introduction">
@@ -927,12 +964,12 @@ def home():
         </div>
 
         <div class="simulation-controls">
-            <h2>Custom Simulation Parameters</h2>
-            <p>Configure your simulation parameters:</p>
+            <h2>Simulation Parameters</h2>
+            <p>Pick defection probabilities and number of rounds:</p>
             
             <div class="parameter-grid">
                 <div class="parameter-group">
-                    <label for="player1_prob">Player 1 Cooperation Probability</label>
+                    <label for="player1_prob">Player 1 Defection Probability</label>
                     <div class="slider-container">
                         <input type="range" id="player1_prob" min="0" max="100" value="50" class="slider">
                         <span id="player1_value">50%</span>
@@ -940,7 +977,7 @@ def home():
                 </div>
                 
                 <div class="parameter-group">
-                    <label for="player2_prob">Player 2 Cooperation Probability</label>
+                    <label for="player2_prob">Player 2 Defection Probability</label>
                     <div class="slider-container">
                         <input type="range" id="player2_prob" min="0" max="100" value="50" class="slider">
                         <span id="player2_value">50%</span>
@@ -950,81 +987,28 @@ def home():
                 <div class="parameter-group">
                     <label for="rounds">Number of Rounds</label>
                     <div class="slider-container">
-                        <input type="range" id="rounds" min="100" max="100000" value="1000" step="100" class="slider">
+                        <input type="range" id="rounds" min="0" max="50000" value="1000" step="100" class="slider">
                         <span id="rounds_value">1,000</span>
                     </div>
-                </div>
-                
-                <div class="parameter-group">
-                    <label for="strategy1">Player 1 Strategy</label>
-                    <select id="strategy1" class="select-input">
-                        <option value="probabilistic">Probabilistic</option>
-                        <option value="always_cooperate">Always Cooperate</option>
-                        <option value="always_defect">Always Defect</option>
-                    </select>
-                </div>
-                
-                <div class="parameter-group">
-                    <label for="strategy2">Player 2 Strategy</label>
-                    <select id="strategy2" class="select-input">
-                        <option value="probabilistic">Probabilistic</option>
-                        <option value="always_cooperate">Always Cooperate</option>
-                        <option value="always_defect">Always Defect</option>
-                    </select>
-                </div>
-                
-                <div class="parameter-group">
-                    <label for="random_seed">Random Seed (optional)</label>
-                    <input type="number" id="random_seed" placeholder="Leave empty for random" class="number-input">
                 </div>
             </div>
             
             <div class="button-group">
-                <button class="btn btn-primary" id="runCustomBtn" onclick="runCustomSimulation()">Run Custom Simulation</button>
-                <button class="btn btn-outline" id="runSweepBtn" onclick="startSimulation()">Run Parameter Sweep (10,000 experiments)</button>
+                <button class="btn btn-primary" id="runCustomBtn" onclick="runCustomSimulation()">Run Simulation</button>
             </div>
         </div>
 
-        <div class="progress-container" id="progressContainer">
+        <div class="progress-container" id="progressContainer" style="display: none;">
             <h3>Simulation Progress</h3>
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
             </div>
             <div class="progress-text" id="progressText">Ready to start...</div>
             
-            <div class="config-display" id="currentConfig">
-                <strong>Current Configuration:</strong> <span id="configText">Waiting...</span>
-            </div>
+            <div class="config-display" id="currentConfig" style="display: none;"></div>
         </div>
 
-        <div class="stats-grid" id="statsGrid" style="display: none;">
-            <div class="stat-item">
-                <span class="stat-label">Completed:</span>
-                <span class="stat-value" id="completedCount">0</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Total:</span>
-                <span class="stat-value" id="totalCount">10,000</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Progress:</span>
-                <span class="stat-value" id="progressPercent">0%</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Elapsed:</span>
-                <span class="stat-value" id="elapsedTime">0s</span>
-            </div>
-        </div>
-
-        <div class="live-updates" id="liveUpdates">
-            <h4>Live Updates</h4>
-            <div id="updatesList">
-                <div class="update-item">
-                    <span class="status-indicator status-completed"></span>
-                    Ready to start simulation...
-                </div>
-            </div>
-        </div>
+        <div class="stats-grid" id="statsGrid" style="display: none;"></div>
 
         <div class="charts-container" id="chartsContainer" style="display: none;">
             <div class="chart-container">
@@ -1039,11 +1023,8 @@ def home():
             <div class="chart-container">
                 <canvas id="coopChart"></canvas>
             </div>
-        </div>
-
-        <div class="histogram-container" id="histogramContainer" style="display: none;">
             <div class="chart-container" style="grid-column: 1 / -1;">
-                <canvas id="histogramChart"></canvas>
+                <canvas id="coopScatterChart"></canvas>
             </div>
         </div>
     </div>
@@ -1081,318 +1062,138 @@ def home():
         function runCustomSimulation() {
             const runCustomBtn = document.getElementById('runCustomBtn');
             const progressContainer = document.getElementById('progressContainer');
-            const statsGrid = document.getElementById('statsGrid');
             const chartsContainer = document.getElementById('chartsContainer');
-            const histogramContainer = document.getElementById('histogramContainer');
             
             // Get parameter values
             const player1Prob = parseFloat(document.getElementById('player1_prob').value) / 100;
             const player2Prob = parseFloat(document.getElementById('player2_prob').value) / 100;
             const rounds = parseInt(document.getElementById('rounds').value);
-            const strategy1 = document.getElementById('strategy1').value;
-            const strategy2 = document.getElementById('strategy2').value;
-            const randomSeed = document.getElementById('random_seed').value;
             
             // Validate parameters
-            if (rounds < 100 || rounds > 100000) {
-                alert('Number of rounds must be between 100 and 100,000');
+            if (rounds < 0 || rounds > 50000) {
+                alert('Number of rounds must be between 0 and 50,000');
                 return;
             }
             
             runCustomBtn.disabled = true;
             progressContainer.style.display = 'block';
-            statsGrid.style.display = 'flex';
             chartsContainer.style.display = 'grid';
-            histogramContainer.style.display = 'grid';
             
             // Show loading state
-            document.getElementById('progressText').textContent = 'Running custom simulation...';
+            document.getElementById('progressText').textContent = 'Starting simulation...';
             document.getElementById('progressFill').style.width = '0%';
-            
-            // Prepare request data
-            const requestData = {
-                player1_prob: player1Prob,
-                player2_prob: player2Prob,
-                rounds: rounds,
-                strategy1: strategy1,
-                strategy2: strategy2
-            };
-            
-            if (randomSeed) {
-                requestData.random_seed = parseInt(randomSeed);
-            }
-            
-            // Send request to backend
-            fetch('/simulate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
-                // Update progress to 100%
-                document.getElementById('progressFill').style.width = '100%';
-                document.getElementById('progressText').textContent = 'Simulation completed!';
-                
-                // Display results
-                displayCustomResults(data);
-                
-                runCustomBtn.disabled = false;
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Simulation failed: ' + error.message);
-                runCustomBtn.disabled = false;
-                progressContainer.style.display = 'none';
-            });
-        }
 
-        function startSimulation() {
-            const runSweepBtn = document.getElementById('runSweepBtn');
-            const progressContainer = document.getElementById('progressContainer');
-            const statsGrid = document.getElementById('statsGrid');
-            const chartsContainer = document.getElementById('chartsContainer');
-            const histogramContainer = document.getElementById('histogramContainer');
-            
-            // Use the selected rounds from the slider for rounds per configuration
-            const roundsPerConfig = parseInt(document.getElementById('rounds').value);
-            
-            runSweepBtn.disabled = true;
-            progressContainer.style.display = 'block';
-            statsGrid.style.display = 'flex';
-            chartsContainer.style.display = 'grid';
-            histogramContainer.style.display = 'grid';
-            
-            // Reset chart data
-            chartData = {
-                p1Payoffs: [],
-                p2Payoffs: [],
-                totalPayoffs: [],
-                cooperationRates: [],
-                labels: []
-            };
-            
-            // Create empty charts immediately for real-time updates
-            charts.p1 = createChart('p1Chart', [], 'Player 1 Average Payoffs', '#6B7280');
-            charts.p2 = createChart('p2Chart', [], 'Player 2 Average Payoffs', '#9CA3AF');
-            charts.total = createChart('totalChart', [], 'Total Average Payoffs', '#6B7280');
-            charts.coop = createChart('coopChart', [], 'Cooperation Rates', '#9CA3AF');
-            
-            // Create histogram chart
-            charts.histogram = createHistogramChart();
-            
-            startTime = Date.now();
-            
-            // Start Server-Sent Events connection
-            eventSource = new EventSource('/simulation_stream');
-            
-            // Add connection monitoring
-            let lastUpdateTime = Date.now();
-            const connectionMonitor = setInterval(() => {
-                if (Date.now() - lastUpdateTime > 30000) { // 30 seconds timeout
-                    console.warn('Connection timeout detected');
-                    addUpdate('Connection timeout - resetting', 'error');
-                    
-                    // Reset UI
-                    document.getElementById('runSweepBtn').disabled = false;
-                    
-                    if (eventSource) {
+            // Create/Reset charts for live run (data will stream from SSE)
+            if (charts.p1) charts.p1.destroy();
+            if (charts.p2) charts.p2.destroy();
+            if (charts.total) charts.total.destroy();
+            if (charts.coop) charts.coop.destroy();
+
+            charts.p1 = createLineChart('p1Chart', [], [], 'Player 1 Average Payoff (live)', '#6B7280');
+            charts.p2 = createLineChart('p2Chart', [], [], 'Player 2 Average Payoff (live)', '#9CA3AF');
+            charts.total = createScatterCombinedChart('totalChart');
+            charts.coop = createPieChart('coopChart',
+                ['Both Cooperate', 'Both Defect', 'P1 Coop, P2 Defect', 'P1 Defect, P2 Coop'],
+                [0, 0, 0, 0],
+                'Outcome Distribution (live)',
+                ['#10B981', '#6B7280', '#F59E0B', '#EF4444']
+            );
+            charts.coopScatter = createCoopScatterChart('coopScatterChart');
+
+            // SSE event handling
+            const labels = [];
+            const p1Series = [];
+            const p2Series = [];
+            const totalScatter = []; // {x,y} points of total average payoff
+            const coopP1Scatter = []; // {x,y} y=cumulative coop rate of p1
+            const coopP2Scatter = []; // {x,y} y=cumulative coop rate of p2
+
+            if (eventSource) { try { eventSource.close(); } catch(e) {} }
+
+            // Open SSE with parameters in the URL; backend will start run if needed
+            const params = new URLSearchParams({
+                p1: String(player1Prob),
+                p2: String(player2Prob),
+                rounds: String(rounds),
+                batch: String(Math.max(10, Math.floor(rounds / 100)))
+            });
+            eventSource = new EventSource('/run_stream?' + params.toString());
+            eventSource.onmessage = onSseMessage;
+            eventSource.onerror = onSseError;
+
+            function onSseMessage(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'progress') {
+                        const { completed, total, progress, metrics } = data;
+                        document.getElementById('progressFill').style.width = progress + '%';
+                        document.getElementById('progressText').textContent = `Processing ${Math.round(progress)}%... (${completed}/${total})`;
+
+                        // Append series points
+                        labels.push(completed);
+                        p1Series.push(metrics.p1_avg);
+                        p2Series.push(metrics.p2_avg);
+                        totalSeries.push(metrics.total_avg);
+
+                        charts.p1.data.labels = labels;
+                        charts.p1.data.datasets[0].data = p1Series;
+                        charts.p1.update('none');
+
+                        charts.p2.data.labels = labels;
+                        charts.p2.data.datasets[0].data = p2Series;
+                        charts.p2.update('none');
+
+                        // Update total scatter: point for total avg, lines for p1/p2
+                        totalScatter.push({ x: completed, y: metrics.total_avg });
+                        charts.total.data.datasets[0].data = totalScatter; // scatter points
+                        charts.total.data.datasets[1].data = labels.map((x, i) => ({ x: labels[i], y: p1Series[i] }));
+                        charts.total.data.datasets[2].data = labels.map((x, i) => ({ x: labels[i], y: p2Series[i] }));
+                        charts.total.update('none');
+
+                        charts.coop.data.datasets[0].data = [
+                            metrics.both_cooperate,
+                            metrics.both_defect,
+                            metrics.p1_coop_p2_defect,
+                            metrics.p1_defect_p2_coop
+                        ];
+                        charts.coop.update('none');
+
+                        // Update cooperation scatter (cumulative rate per player)
+                        const p1CoopCount = metrics.both_cooperate + metrics.p1_coop_p2_defect;
+                        const p2CoopCount = metrics.both_cooperate + metrics.p1_defect_p2_coop;
+                        coopP1Scatter.push({ x: completed, y: p1CoopCount / completed });
+                        coopP2Scatter.push({ x: completed, y: p2CoopCount / completed });
+                        charts.coopScatter.data.datasets[0].data = coopP1Scatter;
+                        charts.coopScatter.data.datasets[1].data = coopP2Scatter;
+                        charts.coopScatter.update('none');
+                    } else if (data.type === 'complete') {
+                        document.getElementById('progressFill').style.width = '100%';
+                        document.getElementById('progressText').textContent = 'Simulation completed!';
+                        runCustomBtn.disabled = false;
+                        eventSource.close();
+                        eventSource = null;
+                    } else if (data.type === 'error') {
+                        alert('Simulation error: ' + data.error);
+                        runCustomBtn.disabled = false;
                         eventSource.close();
                         eventSource = null;
                     }
-                    
-                    clearInterval(connectionMonitor);
-                }
-            }, 5000);
-            
-            eventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleSimulationUpdate(data);
-                } catch (error) {
-                    console.error('Error parsing SSE data:', error);
-                    addUpdate('Error processing simulation data', 'error');
-                }
-            };
-            
-            eventSource.onerror = function(event) {
-                console.error('SSE error:', event);
-                addUpdate('Connection error occurred', 'error');
-                
-                // Reset UI state
-                document.getElementById('runSweepBtn').disabled = false;
-                
-                // Close connection
-                if (eventSource) {
-                    eventSource.close();
-                    eventSource = null;
-                }
-            };
-            
-            // Start the simulation
-            fetch('/start_simulation', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    rounds_per_config: roundsPerConfig,
-                    step_size: 0.01
-                })
-            }).catch(error => {
-                console.error('Error starting simulation:', error);
-                addUpdate('Failed to start simulation', 'error');
-            });
-        }
-
-        function stopSimulation() {
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
-            }
-            
-            fetch('/stop_simulation', { method: 'POST' });
-            
-            document.getElementById('runSweepBtn').disabled = false;
-            
-            addUpdate('Simulation stopped by user', 'error');
-        }
-
-        function handleSimulationUpdate(data) {
-            try {
-                switch(data.type) {
-                    case 'progress':
-                        updateProgress(data);
-                        break;
-                    case 'complete':
-                        handleCompletion(data);
-                        break;
-                    case 'error':
-                        handleError(data);
-                        break;
-                    case 'ping':
-                        // Keep-alive message, do nothing
-                        break;
-                    default:
-                        console.warn('Unknown message type:', data.type);
-                }
-            } catch (error) {
-                console.error('Error handling simulation update:', error);
-                addUpdate('Error processing update: ' + error.message, 'error');
-                
-                // Reset UI state on error
-                document.getElementById('runSweepBtn').disabled = false;
-                
-                if (eventSource) {
-                    eventSource.close();
-                    eventSource = null;
+                } catch (e) {
+                    console.error('SSE parse error', e);
                 }
             }
-        }
 
-        function updateProgress(data) {
-            const progressFill = document.getElementById('progressFill');
-            const progressText = document.getElementById('progressText');
-            const completedCount = document.getElementById('completedCount');
-            const progressPercent = document.getElementById('progressPercent');
-            const elapsedTime = document.getElementById('elapsedTime');
-            const configText = document.getElementById('configText');
-            
-            // Fix progress bar - use actual progress percentage
-            progressFill.style.width = data.progress + '%';
-            progressText.textContent = `Processing ${Math.round(data.progress)}% of configurations...`;
-            completedCount.textContent = data.completed.toLocaleString();
-            progressPercent.textContent = Math.round(data.progress) + '%';
-            
-            if (startTime) {
-                const elapsed = Math.round((Date.now() - startTime) / 1000);
-                elapsedTime.textContent = elapsed + 's';
-            }
-            
-            if (data.current_config) {
-                const config = data.current_config;
-                configText.textContent = `P1: ${(config.p1_prob * 100).toFixed(0)}%, P2: ${(config.p2_prob * 100).toFixed(0)}% | P1 Payoff: ${config.result.player1_avg_payoff.toFixed(2)}, P2 Payoff: ${config.result.player2_avg_payoff.toFixed(2)}`;
-                
-                // Update charts in real-time
-                updateChartsRealTime(config.result, data.completed);
-            }
-            
-            addUpdate(`Completed ${data.completed}/${data.total} configurations (${Math.round(data.progress)}%)`, 'running');
-        }
-
-        function handleCompletion(data) {
-            addUpdate('Simulation completed successfully!', 'completed');
-            
-            document.getElementById('runSweepBtn').disabled = false;
-            
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
-            }
-            
-            // Create charts with final results
-            createCharts(data.results);
-            document.getElementById('chartsContainer').style.display = 'grid';
-        }
-
-        function handleError(data) {
-            addUpdate('Error: ' + data.error, 'error');
-            
-            document.getElementById('runSweepBtn').disabled = false;
-            
-            if (eventSource) {
-                eventSource.close();
+            function onSseError() {
+                console.error('SSE connection error');
+                runCustomBtn.disabled = false;
+                try { eventSource.close(); } catch(e) {}
                 eventSource = null;
             }
         }
-
-        function addUpdate(message, type) {
-            const updatesList = document.getElementById('updatesList');
-            const updateItem = document.createElement('div');
-            updateItem.className = 'update-item';
-            
-            const timestamp = new Date().toLocaleTimeString();
-            updateItem.innerHTML = `
-                <span class="status-indicator status-${type}"></span>
-                [${timestamp}] ${message}
-            `;
-            
-            updatesList.insertBefore(updateItem, updatesList.firstChild);
-            
-            // Keep only last 20 updates
-            while (updatesList.children.length > 20) {
-                updatesList.removeChild(updatesList.lastChild);
-            }
-        }
-
-        // Real-time chart data storage
-        let chartData = {
-            p1Payoffs: [],
-            p2Payoffs: [],
-            totalPayoffs: [],
-            cooperationRates: [],
-            labels: []
-        };
-
-        // Histogram data storage
-        let histogramData = {
-            cooperationLevels: [], // 0% to 100%
-            p1TotalCoins: [], // Total coins for each cooperation level
-            p2TotalCoins: []  // Total coins for each cooperation level
-        };
+        // Simple chart data holder (used by custom charts only)
+        let chartData = {};
 
         function displayCustomResults(result) {
-            // Update statistics display
-            document.getElementById('completedCount').textContent = '1';
-            document.getElementById('totalCount').textContent = '1';
-            document.getElementById('progressPercent').textContent = '100%';
-            
             // Create single result charts
             createCustomCharts(result);
         }
@@ -1524,9 +1325,9 @@ def home():
             return new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: labels,
+                    labels: labels || [],
                     datasets: [{
-                        data: data,
+                        data: data || [],
                         borderColor: color,
                         backgroundColor: color + '15',
                         fill: false,
@@ -1563,193 +1364,41 @@ def home():
             });
         }
 
-        function updateChartsRealTime(result, completed) {
-            // Add new data point
-            chartData.p1Payoffs.push(result.player1_avg_payoff);
-            chartData.p2Payoffs.push(result.player2_avg_payoff);
-            chartData.totalPayoffs.push(result.player1_avg_payoff + result.player2_avg_payoff);
-            chartData.cooperationRates.push(result.both_cooperate_rate);
-            chartData.labels.push(completed);
-            
-            // Update charts if they exist
-            if (charts.p1) {
-                charts.p1.data.datasets[0].data = chartData.p1Payoffs;
-                charts.p1.data.labels = chartData.labels;
-                charts.p1.update('none');
-            }
-            if (charts.p2) {
-                charts.p2.data.datasets[0].data = chartData.p2Payoffs;
-                charts.p2.data.labels = chartData.labels;
-                charts.p2.update('none');
-            }
-            if (charts.total) {
-                charts.total.data.datasets[0].data = chartData.totalPayoffs;
-                charts.total.data.labels = chartData.labels;
-                charts.total.update('none');
-            }
-            if (charts.coop) {
-                charts.coop.data.datasets[0].data = chartData.cooperationRates;
-                charts.coop.data.labels = chartData.labels;
-                charts.coop.update('none');
-            }
-            
-            // Update histogram data
-            updateHistogramData(result);
-        }
-
-        function createCharts(results) {
-            // Prepare data
-            chartData.p1Payoffs = results.map(r => r.player1_avg_payoff);
-            chartData.p2Payoffs = results.map(r => r.player2_avg_payoff);
-            chartData.totalPayoffs = results.map(r => r.player1_avg_payoff + r.player2_avg_payoff);
-            chartData.cooperationRates = results.map(r => r.both_cooperate_rate);
-            chartData.labels = results.map((_, i) => i + 1);
-            
-            // Create charts
-            charts.p1 = createChart('p1Chart', chartData.p1Payoffs, 'Player 1 Average Payoffs', '#6B7280');
-            charts.p2 = createChart('p2Chart', chartData.p2Payoffs, 'Player 2 Average Payoffs', '#9CA3AF');
-            charts.total = createChart('totalChart', chartData.totalPayoffs, 'Total Average Payoffs', '#6B7280');
-            charts.coop = createChart('coopChart', chartData.cooperationRates, 'Cooperation Rates', '#9CA3AF');
-        }
-
-        function createChart(canvasId, data, title, color) {
+        function createScatterCombinedChart(canvasId) {
             const ctx = document.getElementById(canvasId).getContext('2d');
-            
             return new Chart(ctx, {
-                type: 'line',
+                type: 'scatter',
                 data: {
-                    labels: chartData.labels,
-                    datasets: [{
-                        data: data,
-                        borderColor: color,
-                        backgroundColor: color + '15',
-                        fill: false,
-                        tension: 0.1,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        title: {
-                            display: true,
-                            text: title,
-                            font: {
-                                family: 'Inter, system-ui, sans-serif',
-                                size: 14,
-                                weight: '500'
-                            },
-                            color: '#374151'
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            grid: {
-                                display: true,
-                                color: '#F3F4F6',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#6B7280',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 11
-                                }
-                            }
-                        },
-                        y: {
-                            display: true,
-                            beginAtZero: true,
-                            grid: {
-                                display: true,
-                                color: '#F3F4F6',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#6B7280',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 11
-                                }
-                            }
-                        }
-                    },
-                    elements: {
-                        point: {
-                            hoverBackgroundColor: color
-                        }
-                    }
-                }
-            });
-        }
-
-        function updateHistogramData(result) {
-            // Get cooperation levels from the result
-            const p1CoopLevel = Math.round(result.p1_prob * 100);
-            const p2CoopLevel = Math.round(result.p2_prob * 100);
-            
-            // Initialize histogram data if empty
-            if (histogramData.cooperationLevels.length === 0) {
-                for (let i = 0; i <= 100; i++) {
-                    histogramData.cooperationLevels.push(i);
-                    histogramData.p1TotalCoins.push(0);
-                    histogramData.p2TotalCoins.push(0);
-                }
-            }
-            
-            // Add coins to the appropriate cooperation levels
-            histogramData.p1TotalCoins[p1CoopLevel] += result.player1_avg_payoff;
-            histogramData.p2TotalCoins[p2CoopLevel] += result.player2_avg_payoff;
-            
-            // Update histogram chart
-            if (charts.histogram) {
-                charts.histogram.data.datasets[0].data = histogramData.p1TotalCoins;
-                charts.histogram.data.datasets[1].data = histogramData.p2TotalCoins;
-                charts.histogram.update('none');
-            }
-        }
-
-        function createHistogramChart() {
-            const ctx = document.getElementById('histogramChart').getContext('2d');
-            
-            // Initialize histogram data
-            histogramData.cooperationLevels = [];
-            histogramData.p1TotalCoins = [];
-            histogramData.p2TotalCoins = [];
-            
-            for (let i = 0; i <= 100; i++) {
-                histogramData.cooperationLevels.push(i);
-                histogramData.p1TotalCoins.push(0);
-                histogramData.p2TotalCoins.push(0);
-            }
-            
-            return new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: histogramData.cooperationLevels,
                     datasets: [
                         {
-                            label: 'Player 1 Total Coins',
-                            data: histogramData.p1TotalCoins,
-                            backgroundColor: '#3B82F6',
-                            borderColor: '#3B82F6',
-                            borderWidth: 0,
-                            barThickness: 8
+                            type: 'scatter',
+                            label: 'Total Avg Payoff (scatter)',
+                            data: [],
+                            backgroundColor: '#111827',
+                            borderColor: '#111827',
+                            pointRadius: 3
                         },
                         {
-                            label: 'Player 2 Total Coins',
-                            data: histogramData.p2TotalCoins,
-                            backgroundColor: '#EF4444',
-                            borderColor: '#EF4444',
-                            borderWidth: 0,
-                            barThickness: 8
+                            type: 'line',
+                            label: 'P1 Avg Payoff',
+                            data: [], // as {x,y}
+                            borderColor: '#ef4444',
+                            backgroundColor: '#ef4444',
+                            fill: false,
+                            tension: 0,
+                            pointRadius: 0,
+                            borderWidth: 2
+                        },
+                        {
+                            type: 'line',
+                            label: 'P2 Avg Payoff',
+                            data: [], // as {x,y}
+                            borderColor: '#3b82f6',
+                            backgroundColor: '#3b82f6',
+                            fill: false,
+                            tension: 0,
+                            pointRadius: 0,
+                            borderWidth: 2
                         }
                     ]
                 },
@@ -1757,96 +1406,90 @@ def home():
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true,
-                                padding: 20,
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 12,
-                                    weight: '500'
-                                },
-                                color: '#374151'
-                            }
-                        },
+                        legend: { display: true, position: 'top' },
                         title: {
                             display: true,
-                            text: 'Payoff Distribution by Cooperation Probability',
-                            font: {
-                                family: 'Inter, system-ui, sans-serif',
-                                size: 16,
-                                weight: '600'
-                            },
-                            color: '#111827',
-                            padding: {
-                                bottom: 20
-                            }
+                            text: 'Total Average Payoff (scatter) + P1/P2 lines',
+                            font: { family: 'Inter, system-ui, sans-serif', size: 14, weight: '500' },
+                            color: '#374151'
                         }
                     },
+                    parsing: false,
                     scales: {
                         x: {
-                            title: {
-                                display: true,
-                                text: 'Cooperation Probability (%)',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 12,
-                                    weight: '500'
-                                },
-                                color: '#6B7280'
-                            },
-                            grid: {
-                                display: true,
-                                color: '#F3F4F6',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#6B7280',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 10
-                                },
-                                maxTicksLimit: 11
-                            }
+                            type: 'linear',
+                            title: { display: true, text: 'Round', color: '#6B7280' },
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280' }
                         },
                         y: {
-                            title: {
-                                display: true,
-                                text: 'Total Coins Earned',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 12,
-                                    weight: '500'
-                                },
-                                color: '#6B7280'
-                            },
-                            beginAtZero: true,
-                            grid: {
-                                display: true,
-                                color: '#F3F4F6',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#6B7280',
-                                font: {
-                                    family: 'Inter, system-ui, sans-serif',
-                                    size: 10
-                                }
-                            }
+                            title: { display: true, text: 'Coins', color: '#6B7280' },
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280' }
                         }
-                    },
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
-                    },
-                    animation: {
-                        duration: 0 // Disable animation for real-time updates
                     }
                 }
             });
         }
+
+        function createCoopScatterChart(canvasId) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'P1 Cooperation Rate',
+                            data: [],
+                            backgroundColor: '#ef4444',
+                            borderColor: '#ef4444',
+                            pointRadius: 2,
+                            showLine: true,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'P2 Cooperation Rate',
+                            data: [],
+                            backgroundColor: '#3b82f6',
+                            borderColor: '#3b82f6',
+                            pointRadius: 2,
+                            showLine: true,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: 'top' },
+                        title: {
+                            display: true,
+                            text: 'Cooperation Rate over Rounds (scatter)',
+                            font: { family: 'Inter, system-ui, sans-serif', size: 14, weight: '500' },
+                            color: '#374151'
+                        }
+                    },
+                    parsing: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Round', color: '#6B7280' },
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280' }
+                        },
+                        y: {
+                            min: 0,
+                            max: 1,
+                            title: { display: true, text: 'Cooperation Rate', color: '#6B7280' },
+                            grid: { display: true, color: '#F3F4F6' },
+                            ticks: { color: '#6B7280' }
+                        }
+                    }
+                }
+            });
+        }
+
     </script>
     <script>
         // Create footer buttons and modals, and move explanations into them
@@ -1982,94 +1625,108 @@ def simulate():
             return jsonify({"error": "No JSON data provided"}), 400
         
         data = request.json
-        p1 = data.get("player1_prob", 0.5)
-        p2 = data.get("player2_prob", 0.5)
+        p1_defect = data.get("player1_defect_prob", 0.5)
+        p2_defect = data.get("player2_defect_prob", 0.5)
         rounds = data.get("rounds", 1000)
-        strategy1 = data.get("strategy1", "probabilistic")
-        strategy2 = data.get("strategy2", "probabilistic")
-        random_seed = data.get("random_seed", None)
 
         # Input validation
-        if not (0 <= p1 <= 1) or not (0 <= p2 <= 1):
+        if not (0 <= p1_defect <= 1) or not (0 <= p2_defect <= 1):
             return jsonify({"error": "Probabilities must be between 0 and 1"}), 400
         
-        if rounds <= 0 or rounds > 1000000:
-            return jsonify({"error": "Rounds must be between 1 and 1,000,000"}), 400
+        if rounds < 0 or rounds > 50000:
+            return jsonify({"error": "Rounds must be between 0 and 50,000"}), 400
 
         # Run Monte Carlo simulation
-        result = run_monte_carlo_simulation(p1, p2, rounds, strategy1, strategy2, random_seed)
+        result = run_monte_carlo_simulation(p1_defect, p2_defect, rounds)
         
         return jsonify(result)
     
     except Exception as e:
         return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
 
-@app.route('/start_simulation', methods=['POST'])
-def start_simulation():
-    """Start the parameter sweep simulation"""
-    global simulation_thread, current_simulation
-    
-    if current_simulation and current_simulation.get('status') == 'running':
-        return jsonify({"error": "Simulation already running"}), 400
-    
-    data = request.json
-    rounds_per_config = data.get('rounds_per_config', 100)
-    step_size = data.get('step_size', 0.01)
-    
-    def progress_callback(update_data):
-        simulation_queue.put(update_data)
-    
-    # Start simulation in background thread
-    simulation_thread = threading.Thread(
-        target=run_parameter_sweep_background,
-        args=(rounds_per_config, step_size, progress_callback)
+@app.route('/start_run', methods=['POST'])
+def start_run():
+    """Start a single-run simulation in the background and stream progress via SSE."""
+    global run_thread, current_run
+
+    if current_run and current_run.get('status') == 'running':
+        return jsonify({"error": "A simulation is already running"}), 400
+
+    data = request.json or {}
+    p1_defect = float(data.get('player1_defect_prob', 0.5))
+    p2_defect = float(data.get('player2_defect_prob', 0.5))
+    rounds = int(data.get('rounds', 1000))
+    batch_size = int(data.get('batch_size', max(10, rounds // 100)))
+
+    if not (0.0 <= p1_defect <= 1.0 and 0.0 <= p2_defect <= 1.0):
+        return jsonify({"error": "Probabilities must be between 0 and 1"}), 400
+    if rounds < 0 or rounds > 50000:
+        return jsonify({"error": "Rounds must be between 0 and 50,000"}), 400
+
+    # Clear any stale messages from previous runs to avoid instant completion
+    try:
+        while True:
+            run_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+    def progress_callback(payload):
+        run_queue.put(payload)
+
+    # Mark current run as starting before thread begins
+    current_run = {"status": "running", "rounds": rounds, "completed": 0, "start_time": time.time()}
+
+    run_thread = threading.Thread(
+        target=run_simulation_streaming,
+        args=(p1_defect, p2_defect, rounds, batch_size, progress_callback)
     )
-    simulation_thread.daemon = True
-    simulation_thread.start()
-    
+    run_thread.daemon = True
+    run_thread.start()
+
     return jsonify({"message": "Simulation started"})
 
-@app.route('/stop_simulation', methods=['POST'])
-def stop_simulation():
-    """Stop the current simulation"""
-    global current_simulation
-    
-    if current_simulation:
-        current_simulation['status'] = 'stopped'
-    
-    return jsonify({"message": "Simulation stopped"})
+@app.route('/run_stream')
+def run_stream():
+    """SSE stream for the single-run simulation. If not running, start it using query params."""
+    global run_thread, current_run
 
-@app.route('/simulation_stream')
-def simulation_stream():
-    """Server-Sent Events stream for real-time updates"""
+    # If a run is not active, start one from query params to avoid client -> server race
+    if not (current_run and current_run.get('status') == 'running'):
+        try:
+            while True:
+                run_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        p1_defect = float(request.args.get('p1', 0.5))
+        p2_defect = float(request.args.get('p2', 0.5))
+        rounds = int(request.args.get('rounds', 1000))
+        batch_size = int(request.args.get('batch', max(10, rounds // 100)))
+
+        def progress_callback(payload):
+            run_queue.put(payload)
+
+        current_run = {"status": "running", "rounds": rounds, "completed": 0, "start_time": time.time()}
+        run_thread = threading.Thread(
+            target=run_simulation_streaming,
+            args=(p1_defect, p2_defect, rounds, batch_size, progress_callback)
+        )
+        run_thread.daemon = True
+        run_thread.start()
+
     def generate():
         while True:
             try:
-                # Get update from queue (blocking with timeout)
-                update_data = simulation_queue.get(timeout=1)
-                yield f"data: {json.dumps(update_data)}\n\n"
-                
-                if update_data.get('type') == 'complete' or update_data.get('type') == 'error':
+                payload = run_queue.get(timeout=1)
+                yield f"data: {json.dumps(payload)}\n\n"
+                if payload.get('type') in ('complete', 'error'):
                     break
-                    
             except queue.Empty:
-                # Send keep-alive
                 yield f"data: {json.dumps({'type': 'ping'})}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 break
-    
     return Response(generate(), mimetype='text/event-stream')
-
-@app.route('/simulation_status')
-def simulation_status():
-    """Get current simulation status"""
-    global current_simulation
-    
-    if not current_simulation:
-        return jsonify({"status": "idle"})
-    
-    return jsonify(current_simulation)
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=8000)
