@@ -50,17 +50,21 @@ def run_monte_carlo_simulation(p1_defect, p2_defect, rounds):
     # Payoff matrix calculation
     payoffs = torch.zeros((rounds, 2))
 
-    payoffs[:, 0] = torch.where(
-        p1_coops & p2_coops, 3,
-        torch.where(p1_coops & ~p2_coops, 0,
-                   torch.where(~p1_coops & p2_coops, 5, 1))
+    # Use float masks to avoid dtype/shape issues with torch.where and Python ints
+    p1_pay = (
+        (p1_coops & p2_coops).float() * 3.0 +
+        (p1_coops & (~p2_coops)).float() * 0.0 +
+        ((~p1_coops) & p2_coops).float() * 5.0 +
+        ((~p1_coops) & (~p2_coops)).float() * 1.0
     )
-
-    payoffs[:, 1] = torch.where(
-        p1_coops & p2_coops, 3,
-        torch.where(p1_coops & ~p2_coops, 5,
-                   torch.where(~p1_coops & p2_coops, 0, 1))
+    p2_pay = (
+        (p1_coops & p2_coops).float() * 3.0 +
+        (p1_coops & (~p2_coops)).float() * 5.0 +
+        ((~p1_coops) & p2_coops).float() * 0.0 +
+        ((~p1_coops) & (~p2_coops)).float() * 1.0
     )
+    payoffs[:, 0] = p1_pay
+    payoffs[:, 1] = p2_pay
 
     # Calculate statistics
     result = {

@@ -1,11 +1,19 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import torch
 import numpy as np
 import json
+import time
+import threading
+import queue
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend integration
+
+# Globals for SSE streaming single-run
+run_queue = queue.Queue()
+run_thread = None
+current_run = None
 
 @app.route("/")
 def home():
@@ -37,33 +45,82 @@ def home():
     </pre>
     """
 
-@app.route("/simulate", methods=["POST"])
-def simulate():
+@app.route("/start_run", methods=["POST"])
+def start_run():
+    """Start a PyTorch simulation in background and stream progress via /simulate_stream."""
+    global run_thread, current_run
+
+    if current_run and current_run.get('status') == 'running':
+        return jsonify({"error": "A simulation is already running"}), 400
+
+    data = request.json or {}
+    p1 = float(data.get("player1_prob", 0.5))  # cooperation probability
+    p2 = float(data.get("player2_prob", 0.5))
+    rounds = int(data.get("rounds", 1000))
+    batch_size = int(data.get("batch_size", max(10, rounds // 100)))
+
+    if not (0.0 <= p1 <= 1.0 and 0.0 <= p2 <= 1.0):
+        return jsonify({"error": "Probabilities must be between 0 and 1"}), 400
+    if rounds < 0 or rounds > 50000:
+        return jsonify({"error": "Rounds must be between 0 and 50,000"}), 400
+
+    # Clear stale messages from previous runs
     try:
-        if not request.json:
-            return jsonify({"error": "No JSON data provided"}), 400
-        
-        data = request.json
-        p1 = data.get("player1_prob", 0.5)
-        p2 = data.get("player2_prob", 0.5)
-        rounds = data.get("rounds", 1000)
-        strategy1 = data.get("strategy1", "probabilistic")
-        strategy2 = data.get("strategy2", "probabilistic")
+        while True:
+            run_queue.get_nowait()
+    except queue.Empty:
+        pass
 
-        # Input validation
-        if not (0 <= p1 <= 1) or not (0 <= p2 <= 1):
-            return jsonify({"error": "Probabilities must be between 0 and 1"}), 400
-        
-        if rounds <= 0 or rounds > 1000000:
-            return jsonify({"error": "Rounds must be between 1 and 1,000,000"}), 400
+    def progress_callback(payload):
+        # Ensure JSON-serializable types
+        run_queue.put(payload)
 
-        # Run Monte Carlo simulation
-        result = run_monte_carlo_simulation(p1, p2, rounds, strategy1, strategy2)
-        
-        return jsonify(result)
-    
-    except Exception as e:
-        return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
+    current_run = {"status": "running", "rounds": rounds, "completed": 0, "start_time": time.time()}
+    run_thread = threading.Thread(target=run_simulation_streaming, args=(p1, p2, rounds, batch_size, progress_callback))
+    run_thread.daemon = True
+    run_thread.start()
+
+    return jsonify({"message": "Simulation started"})
+
+@app.route("/simulate_stream")
+def simulate_stream():
+    """SSE stream for live simulation updates. If no run is active, start one from query params."""
+    global run_thread, current_run
+
+    if not (current_run and current_run.get('status') == 'running'):
+        # optional auto-start using query params
+        try:
+            while True:
+                run_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        p1 = float(request.args.get('p1', 0.5))
+        p2 = float(request.args.get('p2', 0.5))
+        rounds = int(request.args.get('rounds', 1000))
+        batch_size = int(request.args.get('batch', max(10, rounds // 100)))
+
+        def progress_callback(payload):
+            run_queue.put(payload)
+
+        current_run = {"status": "running", "rounds": rounds, "completed": 0, "start_time": time.time()}
+        run_thread = threading.Thread(target=run_simulation_streaming, args=(p1, p2, rounds, batch_size, progress_callback))
+        run_thread.daemon = True
+        run_thread.start()
+
+    def generate():
+        while True:
+            try:
+                payload = run_queue.get(timeout=1)
+                yield f"data: {json.dumps(payload)}\n\n"
+                if payload.get('type') in ('complete', 'error'):
+                    break
+            except queue.Empty:
+                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+                break
+    return Response(generate(), mimetype='text/event-stream')
 
 def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strategy2="probabilistic"):
     """Run Monte Carlo simulation for Prisoner's Dilemma"""
@@ -93,20 +150,21 @@ def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strate
     # P1 defects, P2 cooperates: (5, 0)
     # Both defect: (1, 1)
     payoffs = torch.zeros((rounds, 2))
-    
-    # Player 1 payoffs
-    payoffs[:, 0] = torch.where(
-        p1_actions & p2_actions, 3,  # Both cooperate
-        torch.where(p1_actions & ~p2_actions, 0,  # P1 cooperates, P2 defects
-                   torch.where(~p1_actions & p2_actions, 5, 1))  # P1 defects, P2 cooperates; Both defect
+    # Vectorized float-mask payoff computation (avoids torch.where scalar dtype issues)
+    p1_pay = (
+        (p1_actions & p2_actions).float() * 3.0 +
+        (p1_actions & (~p2_actions)).float() * 0.0 +
+        ((~p1_actions) & p2_actions).float() * 5.0 +
+        ((~p1_actions) & (~p2_actions)).float() * 1.0
     )
-    
-    # Player 2 payoffs
-    payoffs[:, 1] = torch.where(
-        p1_actions & p2_actions, 3,  # Both cooperate
-        torch.where(p1_actions & ~p2_actions, 5,  # P1 cooperates, P2 defects
-                   torch.where(~p1_actions & p2_actions, 0, 1))  # P1 defects, P2 cooperates; Both defect
+    p2_pay = (
+        (p1_actions & p2_actions).float() * 3.0 +
+        (p1_actions & (~p2_actions)).float() * 5.0 +
+        ((~p1_actions) & p2_actions).float() * 0.0 +
+        ((~p1_actions) & (~p2_actions)).float() * 1.0
     )
+    payoffs[:, 0] = p1_pay
+    payoffs[:, 1] = p2_pay
 
     # Calculate statistics
     p1_coop_rate = float(p1_actions.sum()) / rounds
@@ -137,6 +195,101 @@ def run_monte_carlo_simulation(p1, p2, rounds, strategy1="probabilistic", strate
     }
     
     return result
+
+
+def run_simulation_streaming(p1, p2, rounds, batch_size, progress_callback):
+    """Run batches in PyTorch and stream progress via callback."""
+    global current_run
+    try:
+        current_run = {"status": "running", "rounds": rounds, "completed": 0, "start_time": time.time()}
+
+        if rounds == 0:
+            summary = run_monte_carlo_simulation(p1, p2, 0)
+            progress_callback({"type": "complete", "result": summary})
+            current_run["status"] = "completed"
+            return
+
+        p1_total = 0.0
+        p2_total = 0.0
+        both_coop = 0
+        both_defect = 0
+        p1_coop_p2_defect = 0
+        p1_defect_p2_coop = 0
+
+        remaining = rounds
+        completed = 0
+        while remaining > 0 and current_run.get('status') == 'running':
+            b = min(batch_size, remaining)
+
+            # Sample cooperation according to probabilities
+            p1_actions = torch.rand(b) < p1
+            p2_actions = torch.rand(b) < p2
+
+            # Outcome counts
+            bc = (p1_actions & p2_actions).sum().item()
+            bd = ((~p1_actions) & (~p2_actions)).sum().item()
+            c_d = (p1_actions & (~p2_actions)).sum().item()
+            d_c = ((~p1_actions) & p2_actions).sum().item()
+            both_coop += int(bc)
+            both_defect += int(bd)
+            p1_coop_p2_defect += int(c_d)
+            p1_defect_p2_coop += int(d_c)
+
+            # Payoffs
+            p1_pay = (
+                (p1_actions & p2_actions).float() * 3.0 +
+                (p1_actions & (~p2_actions)).float() * 0.0 +
+                ((~p1_actions) & p2_actions).float() * 5.0 +
+                ((~p1_actions) & (~p2_actions)).float() * 1.0
+            )
+            p2_pay = (
+                (p1_actions & p2_actions).float() * 3.0 +
+                (p1_actions & (~p2_actions)).float() * 5.0 +
+                ((~p1_actions) & p2_actions).float() * 0.0 +
+                ((~p1_actions) & (~p2_actions)).float() * 1.0
+            )
+            p1_total += float(p1_pay.sum().item())
+            p2_total += float(p2_pay.sum().item())
+
+            completed += b
+            remaining -= b
+            progress = (completed / rounds) * 100.0
+            metrics = {
+                "p1_avg": p1_total / completed,
+                "p2_avg": p2_total / completed,
+                "total_avg": (p1_total + p2_total) / completed,
+                "both_cooperate": both_coop,
+                "both_defect": both_defect,
+                "p1_coop_p2_defect": p1_coop_p2_defect,
+                "p1_defect_p2_coop": p1_defect_p2_coop
+            }
+            progress_callback({
+                "type": "progress",
+                "completed": completed,
+                "total": rounds,
+                "progress": progress,
+                "metrics": metrics
+            })
+
+        if current_run.get('status') == 'running':
+            summary = {
+                "player1_avg_payoff": p1_total / rounds if rounds > 0 else 0.0,
+                "player2_avg_payoff": p2_total / rounds if rounds > 0 else 0.0,
+                "player1_coop_rate": (both_coop + p1_coop_p2_defect) / rounds if rounds > 0 else 0.0,
+                "player2_coop_rate": (both_coop + p1_defect_p2_coop) / rounds if rounds > 0 else 0.0,
+                "both_cooperate_rate": both_coop / rounds if rounds > 0 else 0.0,
+                "both_defect_rate": both_defect / rounds if rounds > 0 else 0.0,
+                "p1_coop_p2_defect_rate": p1_coop_p2_defect / rounds if rounds > 0 else 0.0,
+                "p1_defect_p2_coop_rate": p1_defect_p2_coop / rounds if rounds > 0 else 0.0,
+                "total_rounds": rounds,
+                "parameters": {"player1_prob": p1, "player2_prob": p2}
+            }
+            progress_callback({"type": "complete", "result": summary})
+            current_run["status"] = "completed"
+    except Exception as e:
+        if current_run is not None:
+            current_run["status"] = "error"
+        progress_callback({"type": "error", "error": str(e)})
 
 @app.route("/strategies", methods=["GET"])
 def get_strategies():
