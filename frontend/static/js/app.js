@@ -14,12 +14,24 @@ const probabilityInputs = {
     player2: document.querySelector('[data-probability-for="player2"]'),
 };
 
+const PLAYER_KEYS = ["player1", "player2"];
+const PLAYER_COLORS = {
+    player1: "#38bdf8",
+    player2: "#f97316",
+};
+
 let eventSource = null;
 let charts = null;
+const lifecycle = {
+    isRunning: false,
+    isCompleted: false,
+    isStopped: false,
+};
 
 document.addEventListener("DOMContentLoaded", () => {
     charts = initialiseCharts();
     updateProbabilityInputs();
+    resetPlayerStats();
 });
 
 Object.values(strategySelects).forEach((select) => {
@@ -31,6 +43,8 @@ stopButton.addEventListener("click", () => {
         eventSource.close();
         eventSource = null;
     }
+    lifecycle.isRunning = false;
+    lifecycle.isStopped = true;
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Simulation stopped.", "warning");
@@ -49,6 +63,9 @@ form.addEventListener("submit", async (event) => {
     setStatus("Preparing simulation…", "info");
     startButton.disabled = true;
     stopButton.disabled = false;
+    lifecycle.isRunning = true;
+    lifecycle.isCompleted = false;
+    lifecycle.isStopped = false;
 
     try {
         const config = buildSimulationConfig();
@@ -70,6 +87,7 @@ form.addEventListener("submit", async (event) => {
         setStatus(error.message || "Unable to start simulation.", "danger");
         startButton.disabled = false;
         stopButton.disabled = true;
+        lifecycle.isRunning = false;
         summaryContent.innerHTML = "<p class=\"error\">Simulation failed to start.</p>";
     }
 });
@@ -78,7 +96,7 @@ function buildSimulationConfig() {
     const rounds = Number.parseInt(form.rounds.value, 10);
     const monteCarloRuns = Number.parseInt(form.monteCarloRuns.value, 10);
 
-    const strategies = ["player1", "player2"].map((playerKey) => {
+    const strategies = PLAYER_KEYS.map((playerKey) => {
         const type = strategySelects[playerKey].value;
         const result = { type };
         if (type === "probabilistic") {
@@ -119,13 +137,24 @@ function startEventStream(simulationId) {
         setStatus("Simulation finished!", "success");
         startButton.disabled = false;
         stopButton.disabled = true;
+        lifecycle.isRunning = false;
+        lifecycle.isCompleted = true;
         if (eventSource) {
             eventSource.close();
             eventSource = null;
         }
     });
 
-    eventSource.onerror = () => {
+    eventSource.onerror = (error) => {
+        const currentSource = eventSource;
+        if (!lifecycle.isRunning || lifecycle.isCompleted || lifecycle.isStopped) {
+            if (currentSource) {
+                currentSource.close();
+                eventSource = null;
+            }
+            return;
+        }
+        console.error("SSE connection error", error);
         setStatus("Connection lost. Please try again.", "danger");
         startButton.disabled = false;
         stopButton.disabled = true;
@@ -138,54 +167,86 @@ function startEventStream(simulationId) {
 
 function handleRoundEvent(payload) {
     const label = `Run ${payload.run} · Round ${payload.round}`;
-    charts.totalCoins.data.labels.push(label);
-    charts.totalCoins.data.datasets[0].data.push(payload.total_payoff.player1);
-    charts.totalCoins.data.datasets[1].data.push(payload.total_payoff.player2);
-    charts.totalCoins.update("none");
+    PLAYER_KEYS.forEach((playerKey) => {
+        try {
+            const playerCharts = charts[playerKey];
+            if (!playerCharts) {
+                return;
+            }
 
-    charts.roundPayoff.data.labels.push(label);
-    charts.roundPayoff.data.datasets[0].data.push(payload.round_payoff.player1);
-    charts.roundPayoff.data.datasets[1].data.push(payload.round_payoff.player2);
-    charts.roundPayoff.update("none");
+            const totals = payload.total_payoff ?? {};
+            const totalCoins = totals[playerKey];
+            if (typeof totalCoins !== "number") {
+                console.warn(`Missing total coins for ${playerKey}`, payload);
+                return;
+            }
 
-    charts.cooperationRate.data.labels.push(label);
-    charts.cooperationRate.data.datasets[0].data.push(
-        Math.round(payload.cooperation_rate.player1 * 1000) / 10
-    );
-    charts.cooperationRate.data.datasets[1].data.push(
-        Math.round(payload.cooperation_rate.player2 * 1000) / 10
-    );
-    charts.cooperationRate.update("none");
+            const cooperated = payload.cooperated?.[playerKey] ?? false;
 
-    const outcomeCounts = [
-        payload.outcome_counts.CC,
-        payload.outcome_counts.CD,
-        payload.outcome_counts.DC,
-        payload.outcome_counts.DD,
-    ];
-    charts.outcomeDistribution.data.datasets[0].data = outcomeCounts;
-    charts.outcomeDistribution.update("none");
+            playerCharts.coins.data.labels.push(label);
+            playerCharts.coins.data.datasets[0].data.push(totalCoins);
+            playerCharts.coins.update("none");
+
+            playerCharts.cooperation.data.labels.push(label);
+            playerCharts.cooperation.data.datasets[0].data.push(
+                cooperated ? 1 : 0
+            );
+            playerCharts.cooperation.update("none");
+
+            updatePlayerStatsDuringRun(playerKey, payload, totalCoins);
+        } catch (error) {
+            console.error(`Failed to update data for ${playerKey}`, error, payload);
+        }
+    });
 }
 
 function handleSummaryEvent(payload) {
-    const totalCoins = payload.total_payoff;
-    const avgPayoff = payload.average_payoff_per_round;
-    const cooperationRates = payload.cooperation_rate;
+    PLAYER_KEYS.forEach((playerKey) => {
+        const totals = payload.total_payoff ?? {};
+        const averages = payload.average_payoff_per_round ?? {};
+        const rates = payload.cooperation_rate ?? {};
+        const coopTotals = payload.total_cooperation ?? {};
+
+        const totalCoins = totals[playerKey];
+        const averagePayoff = averages[playerKey];
+        const cooperationRate = rates[playerKey];
+        const totalCooperation = coopTotals[playerKey];
+
+        if (
+            typeof totalCoins !== "number" ||
+            typeof averagePayoff !== "number" ||
+            typeof cooperationRate !== "number" ||
+            typeof totalCooperation !== "number"
+        ) {
+            return;
+        }
+
+        setPlayerStat(
+            playerKey,
+            "totalCoins",
+            totalCoins.toFixed(2)
+        );
+        setPlayerStat(
+            playerKey,
+            "avgPayoff",
+            averagePayoff.toFixed(3)
+        );
+        setPlayerStat(
+            playerKey,
+            "coopRate",
+            `${(cooperationRate * 100).toFixed(1)}%`
+        );
+        setPlayerStat(
+            playerKey,
+            "totalCooperation",
+            totalCooperation.toString()
+        );
+    });
 
     summaryContent.innerHTML = `
         <div class="metric">
-            <span><strong>Total Coins</strong><br>Player 1: ${totalCoins.player1.toFixed(
-                2
-            )} | Player 2: ${totalCoins.player2.toFixed(2)}</span>
-            <span><strong>Average Payoff / Round</strong><br>Player 1: ${avgPayoff.player1.toFixed(
-                3
-            )} | Player 2: ${avgPayoff.player2.toFixed(3)}</span>
-        </div>
-        <div class="metric">
-            <span><strong>Cooperation Rate</strong><br>Player 1: ${(cooperationRates.player1 * 100).toFixed(
-                1
-            )}% | Player 2: ${(cooperationRates.player2 * 100).toFixed(1)}%</span>
-            <span><strong>Runs × Rounds</strong><br>${payload.runs} runs · ${payload.rounds} rounds each</span>
+            <span><strong>Runs</strong><br>${payload.runs}</span>
+            <span><strong>Rounds / Run</strong><br>${payload.rounds}</span>
         </div>
         <p><strong>Outcome Counts:</strong> CC ${payload.outcome_counts.CC}, CD ${
         payload.outcome_counts.CD
@@ -199,172 +260,169 @@ function handleSummaryEvent(payload) {
 }
 
 function resetCharts() {
-    Object.values(charts).forEach((chart) => {
-        chart.data.labels.length = 0;
-        chart.data.datasets.forEach((dataset) => {
-            dataset.data.length = 0;
-        });
-        chart.update("none");
+    if (!charts) {
+        return;
+    }
+
+    Object.values(charts).forEach((playerCharts) => {
+        playerCharts.coins.data.labels.length = 0;
+        playerCharts.coins.data.datasets[0].data.length = 0;
+        playerCharts.coins.update("none");
+
+        playerCharts.cooperation.data.labels.length = 0;
+        playerCharts.cooperation.data.datasets[0].data.length = 0;
+        playerCharts.cooperation.update("none");
     });
+
+    resetPlayerStats();
 }
 
 function initialiseCharts() {
-    const totalCoinsChart = new Chart(document.getElementById("totalCoinsChart"), {
+    return PLAYER_KEYS.reduce((acc, playerKey) => {
+        acc[playerKey] = {
+            coins: createCoinsChart(
+                document.getElementById(`${playerKey}CoinsChart`),
+                PLAYER_COLORS[playerKey]
+            ),
+            cooperation: createCooperationChart(
+                document.getElementById(`${playerKey}CooperationChart`),
+                PLAYER_COLORS[playerKey]
+            ),
+        };
+        return acc;
+    }, {});
+}
+
+function createCoinsChart(context, color) {
+    return new Chart(context, {
         type: "line",
         data: {
             labels: [],
             datasets: [
-                datasetConfig("Player 1", "#38bdf8"),
-                datasetConfig("Player 2", "#f472b6"),
+                {
+                    label: "Total Coins",
+                    data: [],
+                    borderColor: color,
+                    backgroundColor: color,
+                    tension: 0.25,
+                    fill: false,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                },
             ],
         },
-        options: baseLineChartOptions("Coins"),
+        options: {
+            animation: false,
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+            },
+            scales: {
+                x: {
+                    ticks: { color: "#cbd5f5" },
+                    grid: { color: "rgba(148, 163, 184, 0.1)" },
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: "#cbd5f5",
+                        callback: (value) => `${value} coins`,
+                    },
+                    grid: { color: "rgba(148, 163, 184, 0.12)" },
+                },
+            },
+        },
     });
+}
 
-    const roundPayoffChart = new Chart(document.getElementById("roundPayoffChart"), {
+function createCooperationChart(context, color) {
+    return new Chart(context, {
         type: "bar",
         data: {
             labels: [],
             datasets: [
-                datasetConfig("Player 1", "#22c55e"),
-                datasetConfig("Player 2", "#f97316"),
+                {
+                    label: "Cooperation",
+                    data: [],
+                    backgroundColor: color,
+                    borderRadius: 6,
+                },
             ],
         },
         options: {
-            ...baseBarChartOptions("Payoff"),
+            animation: false,
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+            },
             scales: {
-                x: { stacked: true },
-                y: { beginAtZero: true },
+                x: {
+                    ticks: { color: "#cbd5f5" },
+                    grid: { display: false },
+                },
+                y: {
+                    beginAtZero: true,
+                    max: 1,
+                    ticks: {
+                        stepSize: 1,
+                        color: "#cbd5f5",
+                        callback: (value) => (value === 1 ? "Cooperate" : "Defect"),
+                    },
+                    grid: { color: "rgba(148, 163, 184, 0.12)" },
+                },
             },
         },
     });
+}
 
-    const cooperationRateChart = new Chart(
-        document.getElementById("cooperationRateChart"),
-        {
-            type: "line",
-            data: {
-                labels: [],
-                datasets: [
-                    datasetConfig("Player 1", "#60a5fa"),
-                    datasetConfig("Player 2", "#facc15"),
-                ],
-            },
-            options: {
-                ...baseLineChartOptions("Cooperation %"),
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        suggestedMax: 100,
-                        ticks: {
-                            callback: (value) => `${value}%`,
-                        },
-                    },
-                },
-            },
-        }
+function updatePlayerStatsDuringRun(playerKey, payload, totalCoins) {
+    const roundsPlayed = payload.round;
+    const cooperationTotals = payload.cumulative_cooperation ?? {};
+    const cooperationRates = payload.cooperation_rate ?? {};
+    const totalCooperation = cooperationTotals[playerKey];
+    const cooperationRate = cooperationRates[playerKey];
+
+    if (
+        typeof totalCoins !== "number" ||
+        typeof totalCooperation !== "number" ||
+        typeof cooperationRate !== "number"
+    ) {
+        return;
+    }
+
+    const averagePayoff = roundsPlayed > 0 ? totalCoins / roundsPlayed : 0;
+
+    setPlayerStat(playerKey, "totalCoins", totalCoins.toFixed(2));
+    setPlayerStat(playerKey, "avgPayoff", averagePayoff.toFixed(3));
+    setPlayerStat(
+        playerKey,
+        "coopRate",
+        `${(cooperationRate * 100).toFixed(1)}%`
     );
+    setPlayerStat(playerKey, "totalCooperation", totalCooperation.toString());
+}
 
-    const outcomeDistributionChart = new Chart(
-        document.getElementById("outcomeDistributionChart"),
-        {
-            type: "doughnut",
-            data: {
-                labels: ["CC", "CD", "DC", "DD"],
-                datasets: [
-                    {
-                        label: "Outcomes",
-                        data: [0, 0, 0, 0],
-                        backgroundColor: ["#38bdf8", "#22c55e", "#f97316", "#f43f5e"],
-                        borderWidth: 0,
-                    },
-                ],
-            },
-            options: {
-                plugins: {
-                    legend: { position: "bottom", labels: { color: "#cbd5f5" } },
-                },
-            },
-        }
+function resetPlayerStats() {
+    PLAYER_KEYS.forEach((playerKey) => {
+        ["totalCoins", "avgPayoff", "coopRate", "totalCooperation"].forEach(
+            (field) => {
+                setPlayerStat(playerKey, field, "--");
+            }
+        );
+    });
+}
+
+function setPlayerStat(playerKey, field, value) {
+    const element = document.querySelector(
+        `.stat-value[data-player="${playerKey}"][data-field="${field}"]`
     );
-
-    return {
-        totalCoins: totalCoinsChart,
-        roundPayoff: roundPayoffChart,
-        cooperationRate: cooperationRateChart,
-        outcomeDistribution: outcomeDistributionChart,
-    };
-}
-
-function datasetConfig(label, color) {
-    return {
-        label,
-        data: [],
-        borderColor: color,
-        backgroundColor: color,
-        fill: false,
-        tension: 0.25,
-        pointRadius: 0,
-        borderWidth: 2,
-    };
-}
-
-function baseLineChartOptions(suffix) {
-    return {
-        animation: false,
-        responsive: true,
-        scales: {
-            x: {
-                ticks: { color: "#cbd5f5" },
-                grid: { color: "rgba(148, 163, 184, 0.1)" },
-            },
-            y: {
-                beginAtZero: true,
-                ticks: {
-                    color: "#cbd5f5",
-                    callback: (value) => `${value} ${suffix}`,
-                },
-                grid: { color: "rgba(148, 163, 184, 0.12)" },
-            },
-        },
-        plugins: {
-            legend: {
-                position: "bottom",
-                labels: { color: "#cbd5f5" },
-            },
-        },
-    };
-}
-
-function baseBarChartOptions(suffix) {
-    return {
-        animation: false,
-        responsive: true,
-        plugins: {
-            legend: {
-                position: "bottom",
-                labels: { color: "#cbd5f5" },
-            },
-        },
-        scales: {
-            x: {
-                ticks: { color: "#cbd5f5" },
-                grid: { color: "rgba(148, 163, 184, 0.1)" },
-            },
-            y: {
-                beginAtZero: true,
-                ticks: {
-                    color: "#cbd5f5",
-                    callback: (value) => `${value} ${suffix}`,
-                },
-                grid: { color: "rgba(148, 163, 184, 0.12)" },
-            },
-        },
-    };
+    if (element) {
+        element.textContent = value ?? "--";
+    }
 }
 
 function updateProbabilityInputs() {
-    ["player1", "player2"].forEach((playerKey) => {
+    PLAYER_KEYS.forEach((playerKey) => {
         const select = strategySelects[playerKey];
         const wrapper = probabilityInputs[playerKey];
         if (select.value === "probabilistic") {

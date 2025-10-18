@@ -40,12 +40,21 @@ class SimulationConfigTests(unittest.TestCase):
         events = list(run_simulation(config))
         round_events = [payload for event, payload in events if event == "round"]
         self.assertEqual(len(round_events), 3)
+        first_round = round_events[0]
+        self.assertIn("cooperated", first_round)
+        self.assertTrue(first_round["cooperated"]["player1"])
+        self.assertTrue(first_round["cooperated"]["player2"])
+        self.assertIn("cumulative_cooperation", first_round)
+        self.assertEqual(first_round["cumulative_cooperation"]["player1"], 1)
+        self.assertEqual(first_round["cumulative_cooperation"]["player2"], 1)
 
         summary = next(payload for event, payload in events if event == "summary")
         self.assertAlmostEqual(summary["total_payoff"]["player1"], 9.0)
         self.assertAlmostEqual(summary["total_payoff"]["player2"], 9.0)
         self.assertAlmostEqual(summary["average_payoff_per_round"]["player1"], 3.0)
         self.assertAlmostEqual(summary["cooperation_rate"]["player1"], 1.0)
+        self.assertEqual(summary["total_cooperation"]["player1"], 3)
+        self.assertEqual(summary["total_cooperation"]["player2"], 3)
 
     def test_probabilistic_strategy_repeatable_with_seed(self):
         torch.manual_seed(42)

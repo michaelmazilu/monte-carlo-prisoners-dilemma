@@ -29,15 +29,11 @@ Dockerfile        # Backend container image
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
-3. **Run the backend:**
+3. **Run the application:**
    ```bash
    flask --app backend.app:create_app run --host 0.0.0.0 --port 8000 --debug
    ```
-4. **Serve the frontend:** use a simple static server from the `frontend` directory:
-   ```bash
-   python -m http.server 3000 --directory frontend
-   ```
-5. Open http://localhost:3000 in your browser. The frontend proxies API calls directly to the Flask server at http://localhost:8000.
+4. Open http://localhost:8000 in your browser — Flask serves both the API and the frontend assets in development.
 
 ## Running with Docker
 ```bash

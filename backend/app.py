@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 from .simulation import (
     SimulationConfig,
@@ -20,14 +21,22 @@ from .simulation import (
     run_simulation,
 )
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+STATIC_DIR = FRONTEND_DIR / "static"
+
 _SESSION_STORE: Dict[str, SimulationConfig] = {}
 _SESSION_LOCK = threading.Lock()
 
 
 def create_app() -> Flask:
     """Application factory used by both development and production runners."""
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
+
+    @app.get("/")
+    def index() -> Response:
+        return send_from_directory(FRONTEND_DIR, "index.html")
 
     @app.get("/health")
     def health() -> Response:
@@ -78,7 +87,7 @@ def create_app() -> Flask:
             for event_name, payload in run_simulation(config):
                 yield _format_sse(event_name, payload)
 
-        response = Response(event_stream(), mimetype="text/event-stream")
+        response = Response(stream_with_context(event_stream()), mimetype="text/event-stream")
         response.headers["Cache-Control"] = "no-cache"
         response.headers["X-Accel-Buffering"] = "no"
         response.headers["Connection"] = "keep-alive"

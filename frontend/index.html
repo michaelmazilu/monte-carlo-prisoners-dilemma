@@ -69,24 +69,70 @@
             </form>
         </section>
 
-        <section class="panel charts-panel">
-            <h2>Live Charts</h2>
-            <div class="chart-grid">
-                <div class="chart-card">
-                    <h3>Total Coins</h3>
-                    <canvas id="totalCoinsChart"></canvas>
+        <section class="player-grid">
+            <div class="panel player-panel" data-player="player1">
+                <div class="player-header">
+                    <h2>Player 1</h2>
+                    <p class="player-description">Individual performance metrics and trends.</p>
+                </div>
+                <div class="player-stats">
+                    <div class="stat">
+                        <span class="stat-label">Total Coins</span>
+                        <span class="stat-value" data-player="player1" data-field="totalCoins">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Average / Round</span>
+                        <span class="stat-value" data-player="player1" data-field="avgPayoff">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Cooperation Rate</span>
+                        <span class="stat-value" data-player="player1" data-field="coopRate">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Total Cooperation</span>
+                        <span class="stat-value" data-player="player1" data-field="totalCooperation">--</span>
+                    </div>
                 </div>
                 <div class="chart-card">
-                    <h3>Per-Round Payoff</h3>
-                    <canvas id="roundPayoffChart"></canvas>
+                    <h3>Coins vs. Rounds</h3>
+                    <canvas id="player1CoinsChart"></canvas>
                 </div>
                 <div class="chart-card">
-                    <h3>Cooperation Rate</h3>
-                    <canvas id="cooperationRateChart"></canvas>
+                    <h3>Cooperation vs. Rounds</h3>
+                    <canvas id="player1CooperationChart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel player-panel" data-player="player2">
+                <div class="player-header">
+                    <h2>Player 2</h2>
+                    <p class="player-description">Individual performance metrics and trends.</p>
+                </div>
+                <div class="player-stats">
+                    <div class="stat">
+                        <span class="stat-label">Total Coins</span>
+                        <span class="stat-value" data-player="player2" data-field="totalCoins">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Average / Round</span>
+                        <span class="stat-value" data-player="player2" data-field="avgPayoff">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Cooperation Rate</span>
+                        <span class="stat-value" data-player="player2" data-field="coopRate">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Total Cooperation</span>
+                        <span class="stat-value" data-player="player2" data-field="totalCooperation">--</span>
+                    </div>
                 </div>
                 <div class="chart-card">
-                    <h3>Outcome Distribution</h3>
-                    <canvas id="outcomeDistributionChart"></canvas>
+                    <h3>Coins vs. Rounds</h3>
+                    <canvas id="player2CoinsChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Cooperation vs. Rounds</h3>
+                    <canvas id="player2CooperationChart"></canvas>
                 </div>
             </div>
         </section>

@@ -139,6 +139,7 @@ def run_simulation(
             run_outcome_counts[outcome_idx] += 1.0
 
             cumulative_round = (run_index - 1) * total_rounds + round_index
+            cooperated_flags = (1 - actions).to(dtype=torch.int64)
             yield (
                 "round",
                 {
@@ -148,6 +149,14 @@ def run_simulation(
                     "actions": {
                         "player1": "C" if actions[0].item() == 0 else "D",
                         "player2": "C" if actions[1].item() == 0 else "D",
+                    },
+                    "cooperated": {
+                        "player1": bool(cooperated_flags[0].item()),
+                        "player2": bool(cooperated_flags[1].item()),
+                    },
+                    "cumulative_cooperation": {
+                        "player1": int(run_cooperation_counts[0].item()),
+                        "player2": int(run_cooperation_counts[1].item()),
                     },
                     "round_payoff": {
                         "player1": float(payoff[0].item()),
@@ -177,6 +186,10 @@ def run_simulation(
                     "player1": float(run_payoff[0].item()),
                     "player2": float(run_payoff[1].item()),
                 },
+                "total_cooperation": {
+                    "player1": int(run_cooperation_counts[0].item()),
+                    "player2": int(run_cooperation_counts[1].item()),
+                },
                 "average_payoff_per_round": {
                     "player1": float(run_payoff[0].item() / total_rounds),
                     "player2": float(run_payoff[1].item() / total_rounds),
@@ -204,6 +217,10 @@ def run_simulation(
         "cooperation_rate": {
             "player1": float(overall_cooperation_counts[0].item() / total_rounds_played),
             "player2": float(overall_cooperation_counts[1].item() / total_rounds_played),
+        },
+        "total_cooperation": {
+            "player1": int(overall_cooperation_counts[0].item()),
+            "player2": int(overall_cooperation_counts[1].item()),
         },
         "outcome_counts": _format_counts(overall_outcome_counts),
         "outcome_distribution": {
