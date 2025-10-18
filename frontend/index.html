@@ -4,84 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monte Carlo Prisoner's Dilemma Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="static/css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
     <script type="module" src="static/js/app.js" defer></script>
 </head>
 <body>
     <header class="app-header">
-        <h1>Monte Carlo Prisoner's Dilemma</h1>
-        <p class="subtitle">Configure strategies, run simulations, and watch the outcomes unfold in real time.</p>
+        <div class="brand">
+            <h1>Monte Carlo Prisoner's Dilemma</h1>
+            <p class="subtitle">Configure strategies, run simulations, and watch outcomes update live.</p>
+        </div>
     </header>
 
-    <main class="app-container">
-        <section class="panel configuration-panel">
-            <h2>Simulation Settings</h2>
-            <form id="simulation-form">
-                <div class="form-group">
+    <main class="app-main">
+        <section class="controls-bar">
+            <form id="simulation-form" class="controls-form">
+                <div class="control-field">
                     <label for="rounds">Rounds</label>
                     <input type="number" id="rounds" name="rounds" min="1" value="50" required>
                 </div>
-
-                <div class="form-group">
+                <div class="control-field">
                     <label for="monteCarloRuns">Monte Carlo Runs</label>
                     <input type="number" id="monteCarloRuns" name="monteCarloRuns" min="1" value="1" required>
-                    <span class="helper-text">Set to 1 to watch a single simulation, or run more for averaged results.</span>
                 </div>
-
-                <div class="strategies">
-                    <div class="strategy">
-                        <h3>Player 1 Strategy</h3>
-                        <label>
-                            Strategy
-                            <select id="player1Strategy" name="player1Strategy" required>
-                                <option value="always_cooperate">Always Cooperate</option>
-                                <option value="always_defect">Always Defect</option>
-                                <option value="probabilistic">Probabilistic</option>
-                            </select>
-                        </label>
-                        <label class="probability-input hidden" data-probability-for="player1">
-                            Cooperation Probability (%)
-                            <input type="number" id="player1Probability" name="player1Probability" min="0" max="100" value="50">
-                        </label>
-                    </div>
-
-                    <div class="strategy">
-                        <h3>Player 2 Strategy</h3>
-                        <label>
-                            Strategy
-                            <select id="player2Strategy" name="player2Strategy" required>
-                                <option value="always_cooperate">Always Cooperate</option>
-                                <option value="always_defect">Always Defect</option>
-                                <option value="probabilistic">Probabilistic</option>
-                            </select>
-                        </label>
-                        <label class="probability-input hidden" data-probability-for="player2">
-                            Cooperation Probability (%)
-                            <input type="number" id="player2Probability" name="player2Probability" min="0" max="100" value="50">
-                        </label>
-                    </div>
+                <div class="control-field">
+                    <label for="player1Strategy">Player 1 Strategy</label>
+                    <select id="player1Strategy" name="player1Strategy" required>
+                        <option value="always_cooperate">Always Cooperate</option>
+                        <option value="always_defect">Always Defect</option>
+                        <option value="probabilistic">Probabilistic</option>
+                    </select>
                 </div>
-
-                <button type="submit" id="startButton">Start Simulation</button>
-                <button type="button" id="stopButton" disabled>Stop</button>
+                <div class="control-field probability-input hidden" data-probability-for="player1">
+                    <label for="player1Probability">Player 1 Cooperation (%)</label>
+                    <input type="number" id="player1Probability" name="player1Probability" min="0" max="100" value="50">
+                </div>
+                <div class="control-field">
+                    <label for="player2Strategy">Player 2 Strategy</label>
+                    <select id="player2Strategy" name="player2Strategy" required>
+                        <option value="always_cooperate">Always Cooperate</option>
+                        <option value="always_defect">Always Defect</option>
+                        <option value="probabilistic">Probabilistic</option>
+                    </select>
+                </div>
+                <div class="control-field probability-input hidden" data-probability-for="player2">
+                    <label for="player2Probability">Player 2 Cooperation (%)</label>
+                    <input type="number" id="player2Probability" name="player2Probability" min="0" max="100" value="50">
+                </div>
+                <div class="controls-actions">
+                    <button type="submit" id="startButton">Start</button>
+                    <button type="button" id="stopButton" disabled>Stop</button>
+                </div>
                 <p id="statusText" aria-live="polite"></p>
             </form>
         </section>
 
-        <section class="player-grid">
-            <div class="panel player-panel" data-player="player1">
-                <div class="player-header">
+        <section class="analytics-grid">
+            <article class="analytics-card player-card" data-player="player1">
+                <header class="card-header">
                     <h2>Player 1</h2>
-                    <p class="player-description">Individual performance metrics and trends.</p>
-                </div>
+                    <p>Individual performance metrics and trendlines.</p>
+                </header>
                 <div class="player-stats">
                     <div class="stat">
                         <span class="stat-label">Total Coins</span>
                         <span class="stat-value" data-player="player1" data-field="totalCoins">--</span>
                     </div>
                     <div class="stat">
-                        <span class="stat-label">Average / Round</span>
+                        <span class="stat-label">Avg / Round</span>
                         <span class="stat-value" data-player="player1" data-field="avgPayoff">--</span>
                     </div>
                     <div class="stat">
@@ -93,28 +86,26 @@
                         <span class="stat-value" data-player="player1" data-field="totalCooperation">--</span>
                     </div>
                 </div>
-                <div class="chart-card">
-                    <h3>Coins vs. Rounds</h3>
+                <div class="chart-slab">
                     <canvas id="player1CoinsChart"></canvas>
                 </div>
-                <div class="chart-card">
-                    <h3>Cooperation vs. Rounds</h3>
+                <div class="chart-slab">
                     <canvas id="player1CooperationChart"></canvas>
                 </div>
-            </div>
+            </article>
 
-            <div class="panel player-panel" data-player="player2">
-                <div class="player-header">
+            <article class="analytics-card player-card" data-player="player2">
+                <header class="card-header">
                     <h2>Player 2</h2>
-                    <p class="player-description">Individual performance metrics and trends.</p>
-                </div>
+                    <p>Individual performance metrics and trendlines.</p>
+                </header>
                 <div class="player-stats">
                     <div class="stat">
                         <span class="stat-label">Total Coins</span>
                         <span class="stat-value" data-player="player2" data-field="totalCoins">--</span>
                     </div>
                     <div class="stat">
-                        <span class="stat-label">Average / Round</span>
+                        <span class="stat-label">Avg / Round</span>
                         <span class="stat-value" data-player="player2" data-field="avgPayoff">--</span>
                     </div>
                     <div class="stat">
@@ -126,22 +117,23 @@
                         <span class="stat-value" data-player="player2" data-field="totalCooperation">--</span>
                     </div>
                 </div>
-                <div class="chart-card">
-                    <h3>Coins vs. Rounds</h3>
+                <div class="chart-slab">
                     <canvas id="player2CoinsChart"></canvas>
                 </div>
-                <div class="chart-card">
-                    <h3>Cooperation vs. Rounds</h3>
+                <div class="chart-slab">
                     <canvas id="player2CooperationChart"></canvas>
                 </div>
-            </div>
-        </section>
+            </article>
 
-        <section class="panel summary-panel">
-            <h2>Simulation Summary</h2>
-            <div id="summaryContent">
-                <p>Run a simulation to view the final statistics.</p>
-            </div>
+            <article class="analytics-card summary-card">
+                <header class="card-header">
+                    <h2>Simulation Summary</h2>
+                    <p>Aggregated results across runs and rounds.</p>
+                </header>
+                <div id="summaryContent" class="summary-body">
+                    <p>Run a simulation to view the final statistics.</p>
+                </div>
+            </article>
         </section>
     </main>
 
