@@ -1,2 +1,1 @@
-# Procfile for Heroku deployment
-web: python3 app.py
+web: gunicorn --worker-class gthread --threads 4 backend.wsgi:app

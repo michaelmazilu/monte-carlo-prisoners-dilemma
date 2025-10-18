@@ -1,23 +1,22 @@
-# Docker Compose for local development
-version: '3.8'
+version: '3.9'
 
 services:
-  web:
+  backend:
     build: .
-    ports:
-      - "5000:5000"
-    environment:
-      - FLASK_ENV=development
+    command: gunicorn --worker-class gthread --threads 4 --bind 0.0.0.0:8000 backend.wsgi:app
     volumes:
       - .:/app
-    restart: unless-stopped
+    environment:
+      - FLASK_APP=backend.app:create_app
+    ports:
+      - "8000:8000"
 
   nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
+    image: nginx:1.27
     depends_on:
-      - web
-    restart: unless-stopped
+      - backend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro

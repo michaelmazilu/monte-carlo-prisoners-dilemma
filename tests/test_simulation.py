@@ -1,0 +1,68 @@
+import unittest
+
+import torch
+
+from backend.simulation import (
+    SimulationConfig,
+    SimulationValidationError,
+    StrategyConfig,
+    StrategyType,
+    run_simulation,
+)
+
+
+class SimulationConfigTests(unittest.TestCase):
+    def test_invalid_rounds_raise(self):
+        with self.assertRaises(SimulationValidationError):
+            SimulationConfig(
+                rounds=0,
+                monte_carlo_runs=1,
+                player_strategies=(
+                    StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                    StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                ),
+            )
+
+    def test_invalid_probability_raises(self):
+        with self.assertRaises(SimulationValidationError):
+            StrategyConfig(StrategyType.PROBABILISTIC, cooperate_probability=1.5)
+
+    def test_cooperate_strategy_produces_expected_totals(self):
+        config = SimulationConfig(
+            rounds=3,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+            ),
+        )
+
+        events = list(run_simulation(config))
+        round_events = [payload for event, payload in events if event == "round"]
+        self.assertEqual(len(round_events), 3)
+
+        summary = next(payload for event, payload in events if event == "summary")
+        self.assertAlmostEqual(summary["total_payoff"]["player1"], 9.0)
+        self.assertAlmostEqual(summary["total_payoff"]["player2"], 9.0)
+        self.assertAlmostEqual(summary["average_payoff_per_round"]["player1"], 3.0)
+        self.assertAlmostEqual(summary["cooperation_rate"]["player1"], 1.0)
+
+    def test_probabilistic_strategy_repeatable_with_seed(self):
+        torch.manual_seed(42)
+        config = SimulationConfig(
+            rounds=5,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.PROBABILISTIC, cooperate_probability=0.75),
+                StrategyConfig(StrategyType.ALWAYS_DEFECT),
+            ),
+        )
+
+        events = [payload for event, payload in run_simulation(config) if event == "round"]
+        actions = [event_payload["actions"]["player1"] for event_payload in events]
+        self.assertEqual(actions.count("C"), 4)
+        self.assertEqual(actions.count("D"), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

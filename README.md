@@ -1,213 +1,70 @@
-# Monte Carlo Prisoner's Dilemma Simulator
+# Monte Carlo Prisoner's Dilemma Simulator (MVP)
 
-A comprehensive web application for simulating thousands of Prisoner's Dilemma games using Monte Carlo sampling of probabilistic strategies. This project calculates average payoffs, visualizes outcomes, and highlights how different strategies perform under varying cooperation probabilities.
+A full-stack MVP for exploring the Prisoner's Dilemma with live visualisations. Configure each player's strategy, run single-shot or Monte Carlo simulations, and watch real-time charts update every round via Server-Sent Events (SSE).
 
-## 🎯 Features
+## Features
+- **Configurable strategies per player:** always cooperate, always defect, or probabilistic with custom cooperation rates.
+- **Simulation controls:** choose rounds and optional Monte Carlo runs for aggregated statistics.
+- **Live analytics:** interactive Chart.js visualisations for cumulative payoff, per-round payoff, cooperation rate, and outcome distribution.
+- **Backend streaming:** Flask 3 + PyTorch 2.8 pipeline emitting SSE updates after every round.
+- **Container-ready:** Docker + docker-compose + Nginx reverse proxy for deployment.
 
-- **Multiple Strategy Types**: Probabilistic, Always Cooperate, Always Defect
-- **Monte Carlo Simulation**: Run thousands of game rounds with statistical accuracy
-- **Interactive Web Interface**: Beautiful, responsive frontend with real-time visualization
-- **Data Visualization**: Charts showing payoffs, cooperation rates, and outcome distributions
-- **RESTful API**: Backend API for programmatic access and integration
-- **Comprehensive Testing**: Unit tests for simulation logic validation
-
-## 🏗️ Project Structure
-
+## Project Structure
 ```
-monte-carlo-prisoners-dilemma/
-├── backend/
-│   └── app.py              # Flask API server
-├── index.html              # Frontend web interface
-├── test_simulation.py      # Unit tests
-├── requirements.txt        # Python dependencies
-├── package.json           # Node.js dependencies
-├── .gitignore            # Git ignore rules
-└── README.md             # This file
+backend/          # Flask app, SSE endpoint, simulation engine
+frontend/         # Static HTML/CSS/JS powered by Chart.js
+nginx/            # Reverse proxy configuration
+requirements.txt  # Python dependencies (Python 3.13+)
+Dockerfile        # Backend container image
 ```
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.8+ 
-- Node.js (optional, for frontend development)
-- Git
-
-### Installation
-
-1. **Clone the repository**
+## Getting Started (Local Python)
+1. **Create a virtual environment** (Python 3.13 suggested):
    ```bash
-   git clone <your-repo-url>
-   cd monte-carlo-prisoners-dilemma
+   python3.13 -m venv .venv
+   source .venv/bin/activate
    ```
-
-2. **Set up Python environment**
+2. **Install dependencies:**
    ```bash
-   # Create virtual environment
-   python -m venv venv
-   
-   # Activate virtual environment
-   # On macOS/Linux:
-   source venv/bin/activate
-   # On Windows:
-   venv\Scripts\activate
-   
-   # Install dependencies
+   pip install --upgrade pip
    pip install -r requirements.txt
    ```
-
-3. **Install Node.js dependencies (optional)**
+3. **Run the backend:**
    ```bash
-   npm install
+   flask --app backend.app:create_app run --host 0.0.0.0 --port 8000 --debug
    ```
-
-### Running the Application
-
-1. **Start the Flask backend**
+4. **Serve the frontend:** use a simple static server from the `frontend` directory:
    ```bash
-   cd backend
-   python app.py
+   python -m http.server 3000 --directory frontend
    ```
-   The API will be available at `http://127.0.0.1:5000`
+5. Open http://localhost:3000 in your browser. The frontend proxies API calls directly to the Flask server at http://localhost:8000.
 
-2. **Open the frontend**
-   - Open `index.html` in your web browser
-   - Or serve it with a local server:
-   ```bash
-   # Using Python
-   python -m http.server 8000
-   # Then visit http://127.0.0.1:8000
-   ```
-
-## 🎮 Usage
-
-### Web Interface
-
-1. Open `index.html` in your browser
-2. Adjust simulation parameters:
-   - **Cooperation Probabilities**: Set how likely each player is to cooperate (0-1)
-   - **Strategies**: Choose from Probabilistic, Always Cooperate, or Always Defect
-   - **Rounds**: Number of game rounds to simulate (100-1,000,000)
-3. Click "Run Simulation" to see results
-4. View interactive charts showing payoffs and cooperation patterns
-
-### API Usage
-
-#### Single Simulation
+## Running with Docker
 ```bash
-curl -X POST http://127.0.0.1:5000/simulate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "player1_prob": 0.7,
-    "player2_prob": 0.3,
-    "rounds": 1000,
-    "strategy1": "probabilistic",
-    "strategy2": "always_cooperate"
-  }'
+docker compose up --build
+```
+- Backend is available at http://localhost:8000.
+- Nginx serves the frontend at http://localhost:8080 and proxies `/api/*` SSE requests to the backend.
+- Gunicorn uses the threaded worker class by default; no gevent dependency is required for Python 3.13 compatibility.
+
+## Testing
+Run the unit test suite (Python unittest):
+```bash
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-#### Batch Simulations
-```bash
-curl -X POST http://127.0.0.1:5000/batch_simulate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "simulations": [
-      {"player1_prob": 0.5, "player2_prob": 0.5, "rounds": 1000},
-      {"player1_prob": 0.8, "player2_prob": 0.2, "rounds": 1000}
-    ]
-  }'
-```
+## API Overview
+- `POST /api/simulations` — start a simulation, returns `{ "simulation_id": "..." }`.
+- `GET /api/simulations/<id>/stream` — open SSE stream emitting `round`, `run_complete`, and `summary` events.
+- `GET /api/strategies` — list supported strategies for UI clients.
+- `GET /health` — health probe for monitoring.
 
-#### Get Available Strategies
-```bash
-curl http://127.0.0.1:5000/strategies
-```
+Each `round` event payload contains actions, payoffs, cumulative totals, cooperation rates, and outcome counts. The `summary` event delivers final totals and averaged statistics across all Monte Carlo runs.
 
-## 📊 Prisoner's Dilemma Payoff Matrix
+## Notes
+- PyTorch powers the simulation to keep the computation vectorised and ready for GPU acceleration if desired.
+- SSE streaming requires servers (like Nginx) to disable buffering. The provided configuration already handles this.
+- The probabilistic strategy accepts either a decimal probability in `[0, 1]` or a percentage in `[0, 100]` from the client.
+- If you previously installed gevent, it is no longer required; the project now runs with Gunicorn's threaded worker class which works out of the box on Python 3.13.
 
-|                | Player 2: Cooperate | Player 2: Defect |
-|----------------|-------------------|------------------|
-| **Player 1: Cooperate** | (3, 3) | (0, 5) |
-| **Player 1: Defect**   | (5, 0) | (1, 1) |
-
-- **Mutual Cooperation**: Both players get 3 points
-- **Mutual Defection**: Both players get 1 point  
-- **Temptation**: Defecting player gets 5 points, cooperating player gets 0
-- **Sucker's Payoff**: Cooperating player gets 0 points, defecting player gets 5
-
-## 🧪 Testing
-
-Run the test suite to validate simulation logic:
-
-```bash
-python test_simulation.py
-```
-
-Tests cover:
-- Probabilistic strategy accuracy
-- Always cooperate/defect strategies
-- Mixed strategy combinations
-- Statistical validation of results
-- Large-scale simulations
-
-## 🔧 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Welcome page with API documentation |
-| `/simulate` | POST | Run a single Monte Carlo simulation |
-| `/batch_simulate` | POST | Run multiple simulations |
-| `/strategies` | GET | Get available strategy types |
-
-## 📈 Simulation Parameters
-
-- **player1_prob**: Probability that Player 1 cooperates (0-1)
-- **player2_prob**: Probability that Player 2 cooperates (0-1)  
-- **rounds**: Number of game rounds to simulate (1-1,000,000)
-- **strategy1**: Player 1's strategy type
-- **strategy2**: Player 2's strategy type
-
-## 🎨 Technologies Used
-
-- **Backend**: Flask, PyTorch, NumPy
-- **Frontend**: HTML5, CSS3, JavaScript, Chart.js
-- **Testing**: Python unittest
-- **Dependencies**: See `requirements.txt` and `package.json`
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
-## 🔬 Research Applications
-
-This simulator can be used for:
-- Game theory research
-- Strategy analysis in economics
-- Behavioral economics studies
-- Machine learning algorithm testing
-- Educational demonstrations of the Prisoner's Dilemma
-
-## 🐛 Troubleshooting
-
-**Flask app not starting:**
-- Ensure virtual environment is activated
-- Check that all dependencies are installed: `pip install -r requirements.txt`
-- Verify Python version compatibility
-
-**Frontend not connecting to backend:**
-- Ensure Flask app is running on `http://127.0.0.1:5000`
-- Check browser console for CORS errors
-- Verify network connectivity
-
-**Simulation errors:**
-- Check that probabilities are between 0 and 1
-- Ensure rounds count is reasonable (100-1,000,000)
-- Review error messages in browser console or Flask logs
+Enjoy exploring strategic choices in the Prisoner's Dilemma!

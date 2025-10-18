@@ -1,30 +1,25 @@
-# Dockerfile for containerized deployment
-FROM python:3.13-slim
+# syntax=docker/dockerfile:1
+FROM python:3.13-slim AS base
 
-# Set working directory
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
 COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend ./backend
+COPY frontend ./frontend
 
-# Copy application code
-COPY . .
+ENV FLASK_APP=backend.app:create_app
 
-# Expose port
-EXPOSE 5000
+EXPOSE 8000
 
-# Set environment variables
-ENV FLASK_APP=app.py
-ENV FLASK_ENV=production
-
-# Run the application
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--worker-class", "gthread", "--threads", "4", "--bind", "0.0.0.0:8000", "backend.wsgi:app"]
