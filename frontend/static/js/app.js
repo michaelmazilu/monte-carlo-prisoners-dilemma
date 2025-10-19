@@ -28,6 +28,9 @@ const DEFAULT_PAYOFFS = {
     punishment: 1,
 };
 
+const CHART_UPDATE_INTERVAL = 25;
+const MAX_CHART_POINTS = 2000;
+
 const editPayoffsButton = document.getElementById("editPayoffsButton");
 const savePayoffsButton = document.getElementById("savePayoffsButton");
 const cancelPayoffsButton = document.getElementById("cancelPayoffsButton");
@@ -48,6 +51,11 @@ const PLAYER_COLORS = {
     player1: "#38bdf8",
     player2: "#f97316",
 };
+
+const pendingChartUpdates = PLAYER_KEYS.reduce((acc, key) => {
+    acc[key] = false;
+    return acc;
+}, {});
 
 let eventSource = null;
 let charts = null;
@@ -264,11 +272,13 @@ function startEventStream(simulationId) {
         if (!lifecycle.isCompleted) {
             setStatus("Simulation in progress…", "info");
         }
+        flushPendingChartUpdates();
     });
 
     eventSource.addEventListener("summary", (event) => {
         const payload = JSON.parse(event.data);
         handleSummaryEvent(payload);
+        flushPendingChartUpdates(true);
         setStatus("Simulation finished!", "success");
         startButton.disabled = false;
         stopButton.disabled = true;
@@ -319,13 +329,15 @@ function handleRoundEvent(payload) {
                 return;
             }
 
-            playerCharts.coins.data.labels.push(label);
-            playerCharts.coins.data.datasets[0].data.push(totalCoins);
-            playerCharts.coins.update("none");
+            appendChartPoint(playerCharts.coins, label, totalCoins);
+            appendChartPoint(playerCharts.cooperation, label, cooperationCount);
 
-            playerCharts.cooperation.data.labels.push(label);
-            playerCharts.cooperation.data.datasets[0].data.push(cooperationCount);
-            playerCharts.cooperation.update("none");
+            if (shouldUpdateChart(payload.round)) {
+                updatePlayerCharts(playerCharts);
+                pendingChartUpdates[playerKey] = false;
+            } else {
+                pendingChartUpdates[playerKey] = true;
+            }
 
             updatePlayerStatsDuringRun(playerKey, payload, totalCoins);
         } catch (error) {
@@ -439,6 +451,7 @@ function resetCharts() {
         playerCharts.cooperation.update("none");
     });
 
+    resetPendingChartUpdates();
     resetPlayerStats();
     setSummaryPlaceholder();
 }
@@ -577,6 +590,47 @@ function resetPlayerStats() {
                 setPlayerStat(playerKey, field, "--");
             }
         );
+    });
+}
+
+function appendChartPoint(chart, label, value) {
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > MAX_CHART_POINTS) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+}
+
+function shouldUpdateChart(roundNumber) {
+    return roundNumber === 1 || roundNumber % CHART_UPDATE_INTERVAL === 0;
+}
+
+function updatePlayerCharts(playerCharts) {
+    playerCharts.coins.update("none");
+    playerCharts.cooperation.update("none");
+}
+
+function flushPendingChartUpdates(force = false) {
+    if (!charts) {
+        return;
+    }
+    PLAYER_KEYS.forEach((playerKey) => {
+        if (!force && !pendingChartUpdates[playerKey]) {
+            return;
+        }
+        const playerCharts = charts[playerKey];
+        if (!playerCharts) {
+            return;
+        }
+        updatePlayerCharts(playerCharts);
+        pendingChartUpdates[playerKey] = false;
+    });
+}
+
+function resetPendingChartUpdates() {
+    PLAYER_KEYS.forEach((playerKey) => {
+        pendingChartUpdates[playerKey] = false;
     });
 }
 
