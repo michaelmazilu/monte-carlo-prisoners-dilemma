@@ -84,45 +84,22 @@
                         <p>Fine-tune the reward matrix used for each round of the dilemma.</p>
                     </header>
                     <div class="payoff-field">
-                        <div class="payoff-preview" id="payoffPreview">
-                            <span class="preview-chip">
-                                <span class="preview-label">R</span>
-                                <span class="preview-value" data-payoff-value="reward">3</span>
-                            </span>
-                            <span class="preview-chip">
-                                <span class="preview-label">T</span>
-                                <span class="preview-value" data-payoff-value="temptation">5</span>
-                            </span>
-                            <span class="preview-chip">
-                                <span class="preview-label">S</span>
-                                <span class="preview-value" data-payoff-value="sucker">0</span>
-                            </span>
-                            <span class="preview-chip">
-                                <span class="preview-label">P</span>
-                                <span class="preview-value" data-payoff-value="punishment">1</span>
-                            </span>
-                        </div>
-                        <button type="button" id="editPayoffsButton" class="ghost-button">Edit Payoffs</button>
-                        <div class="payoff-editor hidden" id="payoffEditor" aria-hidden="true">
-                            <div class="payoff-input">
-                                <label for="payoffReward">Reward (R)</label>
-                                <input type="number" id="payoffReward" name="payoffReward" step="0.1" value="3">
+                        <div class="payoff-inputs" id="payoffInputs" aria-label="Payoff outcome values">
+                            <div class="payoff-input-card payoff-input-card--reward">
+                                <label class="payoff-input-label" for="payoffReward">Reward — both prisoners cooperate</label>
+                                <input type="number" id="payoffReward" name="payoffReward" step="0.1" value="3" inputmode="decimal">
                             </div>
-                            <div class="payoff-input">
-                                <label for="payoffTemptation">Temptation (T)</label>
-                                <input type="number" id="payoffTemptation" name="payoffTemptation" step="0.1" value="5">
+                            <div class="payoff-input-card payoff-input-card--temptation">
+                                <label class="payoff-input-label" for="payoffTemptation">Temptation — you defect, opponent cooperates</label>
+                                <input type="number" id="payoffTemptation" name="payoffTemptation" step="0.1" value="5" inputmode="decimal">
                             </div>
-                            <div class="payoff-input">
-                                <label for="payoffSucker">Sucker (S)</label>
-                                <input type="number" id="payoffSucker" name="payoffSucker" step="0.1" value="0">
+                            <div class="payoff-input-card payoff-input-card--sucker">
+                                <label class="payoff-input-label" for="payoffSucker">Sucker — you cooperate, opponent defects</label>
+                                <input type="number" id="payoffSucker" name="payoffSucker" step="0.1" value="0" inputmode="decimal">
                             </div>
-                            <div class="payoff-input">
-                                <label for="payoffPunishment">Punishment (P)</label>
-                                <input type="number" id="payoffPunishment" name="payoffPunishment" step="0.1" value="1">
-                            </div>
-                            <div class="payoff-editor-actions">
-                                <button type="button" id="savePayoffsButton">Save</button>
-                                <button type="button" id="cancelPayoffsButton" class="ghost-button">Cancel</button>
+                            <div class="payoff-input-card payoff-input-card--punishment">
+                                <label class="payoff-input-label" for="payoffPunishment">Punishment — both prisoners defect</label>
+                                <input type="number" id="payoffPunishment" name="payoffPunishment" step="0.1" value="1" inputmode="decimal">
                             </div>
                         </div>
                     </div>

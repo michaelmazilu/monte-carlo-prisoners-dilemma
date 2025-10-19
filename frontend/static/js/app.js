@@ -31,19 +31,6 @@ const DEFAULT_PAYOFFS = {
 const CHART_UPDATE_INTERVAL = 25;
 const MAX_CHART_POINTS = 2000;
 
-const editPayoffsButton = document.getElementById("editPayoffsButton");
-const savePayoffsButton = document.getElementById("savePayoffsButton");
-const cancelPayoffsButton = document.getElementById("cancelPayoffsButton");
-const payoffEditor = document.getElementById("payoffEditor");
-const payoffPreviewFields = Array.from(document.querySelectorAll("[data-payoff-value]"))
-    .reduce((acc, element) => {
-        const key = element.dataset.payoffValue;
-        if (key) {
-            acc[key] = element;
-        }
-        return acc;
-    }, {});
-
 let payoffState = { ...DEFAULT_PAYOFFS };
 
 const PLAYER_KEYS = ["player1", "player2"];
@@ -59,6 +46,7 @@ const pendingChartUpdates = PLAYER_KEYS.reduce((acc, key) => {
 
 let eventSource = null;
 let charts = null;
+let coinsAxisMax = 0;
 const lifecycle = {
     isRunning: false,
     isCompleted: false,
@@ -67,6 +55,7 @@ const lifecycle = {
 
 document.addEventListener("DOMContentLoaded", () => {
     charts = initialiseCharts();
+    synchroniseCoinsAxes();
     updateProbabilityInputs();
     resetPlayerStats();
     setSummaryPlaceholder();
@@ -76,27 +65,6 @@ document.addEventListener("DOMContentLoaded", () => {
 Object.values(strategySelects).forEach((select) => {
     select.addEventListener("change", updateProbabilityInputs);
 });
-
-if (editPayoffsButton) {
-    editPayoffsButton.addEventListener("click", () => {
-        openPayoffEditor();
-    });
-}
-
-if (savePayoffsButton) {
-    savePayoffsButton.addEventListener("click", () => {
-        payoffState = readPayoffInputs();
-        updatePayoffPreview();
-        hidePayoffEditor();
-    });
-}
-
-if (cancelPayoffsButton) {
-    cancelPayoffsButton.addEventListener("click", () => {
-        syncPayoffInputsFromState();
-        hidePayoffEditor();
-    });
-}
 
 stopButton.addEventListener("click", () => {
     if (eventSource) {
@@ -179,80 +147,69 @@ function getPayoffValues() {
 
 function initialisePayoffControls() {
     payoffState = { ...DEFAULT_PAYOFFS };
-    updatePayoffPreview();
-    syncPayoffInputsFromState();
-    hidePayoffEditor();
+    Object.entries(payoffInputs).forEach(([key, input]) => {
+        if (!input) {
+            return;
+        }
+        const parsed = Number.parseFloat(input.value);
+        if (Number.isFinite(parsed)) {
+            payoffState[key] = parsed;
+        } else {
+            input.value = formatInputValue(payoffState[key]);
+        }
+        input.setCustomValidity("");
+    });
+    attachPayoffInputListeners();
 }
 
-function openPayoffEditor() {
-    syncPayoffInputsFromState();
-    if (!payoffEditor) {
-        return;
-    }
-    payoffEditor.classList.remove("hidden");
-    payoffEditor.setAttribute("aria-hidden", "false");
-    if (editPayoffsButton) {
-        editPayoffsButton.disabled = true;
-    }
-    const firstInput = payoffInputs.reward;
-    if (firstInput) {
-        firstInput.focus();
-        firstInput.select();
-    }
+function attachPayoffInputListeners() {
+    Object.entries(payoffInputs).forEach(([key, input]) => {
+        if (!input) {
+            return;
+        }
+        input.addEventListener("input", () => handlePayoffInputChange(key, input, false));
+        input.addEventListener("change", () => handlePayoffInputChange(key, input, true));
+        input.addEventListener("blur", () => handlePayoffInputChange(key, input, true));
+    });
 }
 
-function hidePayoffEditor() {
-    if (!payoffEditor) {
+function handlePayoffInputChange(key, input, enforceValidity) {
+    const parsed = Number.parseFloat(input.value);
+    if (Number.isFinite(parsed)) {
+        payoffState[key] = parsed;
         return;
     }
-    payoffEditor.classList.add("hidden");
-    payoffEditor.setAttribute("aria-hidden", "true");
-    if (editPayoffsButton) {
-        editPayoffsButton.disabled = false;
+
+    if (!enforceValidity) {
+        return;
     }
+
+    const fallback = getPayoffFallbackValue(key);
+    payoffState[key] = fallback;
+    syncPayoffInputsFromState();
+}
+
+function getPayoffFallbackValue(key) {
+    const current = payoffState[key];
+    if (typeof current === "number" && Number.isFinite(current)) {
+        return current;
+    }
+    return DEFAULT_PAYOFFS[key];
 }
 
 function syncPayoffInputsFromState() {
     Object.entries(payoffInputs).forEach(([key, input]) => {
         if (input) {
-            input.value = payoffState[key];
+            input.value = formatInputValue(payoffState[key]);
         }
     });
 }
 
-function readPayoffInputs() {
-    return Object.entries(payoffInputs).reduce((acc, [key, input]) => {
-        acc[key] = parsePayoffInput(key, input);
-        return acc;
-    }, {});
-}
-
-function parsePayoffInput(key, input) {
-    const fallback = payoffState[key] ?? DEFAULT_PAYOFFS[key];
-    if (!input) {
-        return fallback;
-    }
-    const parsed = Number.parseFloat(input.value);
-    if (!Number.isFinite(parsed)) {
-        return fallback;
-    }
-    return parsed;
-}
-
-function updatePayoffPreview() {
-    Object.entries(payoffPreviewFields).forEach(([key, element]) => {
-        if (element) {
-            element.textContent = formatPayoffValue(payoffState[key]);
-        }
-    });
-}
-
-function formatPayoffValue(value) {
+function formatInputValue(value) {
     if (typeof value !== "number" || Number.isNaN(value)) {
-        return "--";
+        return "";
     }
-    const fixed = Number.isInteger(value) ? value.toString() : value.toFixed(2);
-    return fixed.replace(/\.0+$/, "");
+    return Number.isInteger(value) ? value.toString() : String(value);
 }
 
 function startEventStream(simulationId) {
@@ -325,6 +282,20 @@ function handleRoundBatchEvent(payload) {
 
 function handleRoundEvent(payload) {
     const label = `Round ${payload.round}`;
+    const totals = payload.total_payoff ?? {};
+    const maxCoinsThisRound = PLAYER_KEYS.reduce((acc, key) => {
+        const value = totals[key];
+        if (typeof value === "number") {
+            return Math.max(acc, value);
+        }
+        return acc;
+    }, 0);
+
+    if (maxCoinsThisRound > coinsAxisMax) {
+        coinsAxisMax = maxCoinsThisRound;
+        synchroniseCoinsAxes();
+    }
+
     PLAYER_KEYS.forEach((playerKey) => {
         try {
             const playerCharts = charts[playerKey];
@@ -332,17 +303,23 @@ function handleRoundEvent(payload) {
                 return;
             }
 
-            const totals = payload.total_payoff ?? {};
-            const totalCooperationCounts = payload.cumulative_cooperation ?? {};
+            const cooperationRates = payload.cooperation_rate ?? {};
             const totalCoins = totals[playerKey];
-            const cooperationCount = totalCooperationCounts[playerKey];
-            if (typeof totalCoins !== "number" || typeof cooperationCount !== "number") {
+            const cooperationRate = cooperationRates[playerKey];
+            if (
+                typeof totalCoins !== "number" ||
+                typeof cooperationRate !== "number"
+            ) {
                 console.warn(`Missing totals for ${playerKey}`, payload);
                 return;
             }
 
             appendChartPoint(playerCharts.coins, label, totalCoins);
-            appendChartPoint(playerCharts.cooperation, label, cooperationCount);
+            appendChartPoint(
+                playerCharts.cooperation,
+                label,
+                cooperationRate * 100
+            );
 
             if (shouldUpdateChart(payload.round)) {
                 updatePlayerCharts(playerCharts);
@@ -463,6 +440,8 @@ function resetCharts() {
         playerCharts.cooperation.update("none");
     });
 
+    coinsAxisMax = 0;
+    synchroniseCoinsAxes();
     resetPendingChartUpdates();
     resetPlayerStats();
     setSummaryPlaceholder();
@@ -517,6 +496,7 @@ function createCoinsChart(context, color) {
                     beginAtZero: true,
                     ticks: {
                         color: "#cbd5f5",
+                        precision: 0,
                         callback: (value) => `${value} coins`,
                     },
                     grid: { color: "rgba(148, 163, 184, 0.12)" },
@@ -533,7 +513,7 @@ function createCooperationChart(context, color) {
             labels: [],
             datasets: [
                 {
-                    label: "Total Cooperations",
+                    label: "Cooperation %",
                     data: [],
                     borderColor: color,
                     backgroundColor: color,
@@ -557,9 +537,13 @@ function createCooperationChart(context, color) {
                 },
                 y: {
                     beginAtZero: true,
+                    suggestedMax: 100,
+                    max: 100,
                     ticks: {
                         color: "#cbd5f5",
-                        callback: (value) => `${value}`,
+                        precision: 0,
+                        stepSize: 10,
+                        callback: (value) => `${value}%`,
                     },
                     grid: { color: "rgba(148, 163, 184, 0.12)" },
                 },
@@ -643,6 +627,22 @@ function flushPendingChartUpdates(force = false) {
 function resetPendingChartUpdates() {
     PLAYER_KEYS.forEach((playerKey) => {
         pendingChartUpdates[playerKey] = false;
+    });
+}
+
+function synchroniseCoinsAxes() {
+    if (!charts) {
+        return;
+    }
+    const baseMax = coinsAxisMax > 0 ? coinsAxisMax * 1.05 : 10;
+    const paddedMax = Math.max(10, Math.ceil(baseMax));
+    PLAYER_KEYS.forEach((playerKey) => {
+        const playerCharts = charts[playerKey];
+        if (!playerCharts) {
+            return;
+        }
+        playerCharts.coins.options.scales.y.max = paddedMax;
+        playerCharts.coins.options.scales.y.beginAtZero = true;
     });
 }
 
