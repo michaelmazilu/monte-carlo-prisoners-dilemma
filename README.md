@@ -3,7 +3,7 @@
 A full-stack MVP for exploring the Prisoner's Dilemma with live visualisations. Configure each player's strategy, run single-shot or Monte Carlo simulations, and watch real-time charts update every round via Server-Sent Events (SSE).
 
 ## Features
-- **Configurable strategies per player:** always cooperate, always defect, or probabilistic with custom cooperation rates.
+- **Configurable strategies per player:** always cooperate, always defect, probabilistic with custom cooperation rates, Tit for Tat, or Random.
 - **Simulation controls:** choose rounds and optional Monte Carlo runs for aggregated statistics.
 - **Live analytics:** interactive Chart.js visualisations for cumulative payoff, per-round payoff, cooperation rate, and outcome distribution.
 - **Backend streaming:** Flask 3 + PyTorch 2.8 pipeline emitting SSE updates after every round.

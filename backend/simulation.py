@@ -21,12 +21,35 @@ class SimulationValidationError(ValueError):
     """Raised when the simulation configuration is invalid."""
 
 
+class StrategyLookupError(ValueError):
+    """Raised when an unknown strategy key is provided."""
+
+
 class StrategyType(str, Enum):
     """Supported strategy identifiers."""
 
     ALWAYS_COOPERATE = "always_cooperate"
     ALWAYS_DEFECT = "always_defect"
     PROBABILISTIC = "probabilistic"
+    TIT_FOR_TAT = "tit_for_tat"
+    RANDOM = "random"
+
+
+ALLOWED_STRATEGY_KEYS = {
+    StrategyType.ALWAYS_COOPERATE.value: StrategyType.ALWAYS_COOPERATE,
+    StrategyType.ALWAYS_DEFECT.value: StrategyType.ALWAYS_DEFECT,
+    StrategyType.PROBABILISTIC.value: StrategyType.PROBABILISTIC,
+    StrategyType.TIT_FOR_TAT.value: StrategyType.TIT_FOR_TAT,
+    StrategyType.RANDOM.value: StrategyType.RANDOM,
+    "tit-for-tat": StrategyType.TIT_FOR_TAT,
+}
+
+
+def resolve_strategy_type(key: str) -> StrategyType:
+    try:
+        return ALLOWED_STRATEGY_KEYS[key]
+    except KeyError as exc:  # pragma: no cover - defensive
+        raise StrategyLookupError(key) from exc
 
 
 @dataclass(frozen=True)
@@ -43,7 +66,7 @@ class StrategyConfig:
                     "Probabilistic strategies require cooperate_probability in [0, 1]."
                 )
 
-    def sample_action(self) -> int:
+    def sample_action(self, *, round_index: int, opponent_previous_action: int) -> int:
         """
         Draw an action for the current round.
 
@@ -53,6 +76,13 @@ class StrategyConfig:
             return 0
         if self.strategy_type is StrategyType.ALWAYS_DEFECT:
             return 1
+        if self.strategy_type is StrategyType.TIT_FOR_TAT:
+            if round_index == 1:
+                return 0
+            return int(bool(opponent_previous_action))
+        if self.strategy_type is StrategyType.RANDOM:
+            draw = torch.randint(0, 2, (1,), dtype=torch.int64)
+            return int(draw.item())
         # Probabilistic strategy
         probability = torch.tensor(self.cooperate_probability, dtype=torch.float32)
         draw = torch.bernoulli(probability).to(dtype=torch.int64)
@@ -123,15 +153,18 @@ def run_simulation(
         run_payoff = torch.zeros(2, dtype=torch.float32)
         run_cooperation_counts = torch.zeros(2, dtype=torch.float32)
         run_outcome_counts = torch.zeros(len(OUTCOME_KEYS), dtype=torch.float32)
+        previous_actions = torch.zeros(2, dtype=torch.int64)
 
         for round_index in range(1, total_rounds + 1):
-            actions = torch.tensor(
-                [
-                    config.player_strategies[0].sample_action(),
-                    config.player_strategies[1].sample_action(),
-                ],
-                dtype=torch.int64,
+            action_player1 = config.player_strategies[0].sample_action(
+                round_index=round_index,
+                opponent_previous_action=int(previous_actions[1].item()),
             )
+            action_player2 = config.player_strategies[1].sample_action(
+                round_index=round_index,
+                opponent_previous_action=int(previous_actions[0].item()),
+            )
+            actions = torch.tensor([action_player1, action_player2], dtype=torch.int64)
             payoff = PAYOFF_MATRIX[actions[0], actions[1]]
             run_payoff += payoff
             run_cooperation_counts += (1 - actions).to(dtype=torch.float32)
@@ -173,6 +206,8 @@ def run_simulation(
                     "outcome_counts": _format_counts(run_outcome_counts),
                 },
             )
+
+            previous_actions = actions
 
         overall_payoff += run_payoff
         overall_cooperation_counts += run_cooperation_counts

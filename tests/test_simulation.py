@@ -72,6 +72,25 @@ class SimulationConfigTests(unittest.TestCase):
         self.assertEqual(actions.count("C"), 4)
         self.assertEqual(actions.count("D"), 1)
 
+    def test_tit_for_tat_vs_defect_behaviour(self):
+        config = SimulationConfig(
+            rounds=4,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.TIT_FOR_TAT),
+                StrategyConfig(StrategyType.ALWAYS_DEFECT),
+            ),
+        )
+
+        events = list(run_simulation(config))
+        summary = next(payload for event, payload in events if event == "summary")
+        self.assertAlmostEqual(summary["total_payoff"]["player1"], 3.0)
+        self.assertAlmostEqual(summary["total_payoff"]["player2"], 8.0)
+        rounds = [payload for event, payload in events if event == "round"]
+        self.assertEqual(rounds[0]["actions"]["player1"], "C")
+        for round_payload in rounds[1:]:
+            self.assertEqual(round_payload["actions"]["player1"], "D")
+
 
 if __name__ == "__main__":
     unittest.main()

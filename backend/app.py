@@ -14,11 +14,13 @@ from typing import Dict, Iterable, Tuple
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 from .simulation import (
+    StrategyLookupError,
     SimulationConfig,
     SimulationValidationError,
     StrategyConfig,
     StrategyType,
     run_simulation,
+    resolve_strategy_type,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -59,6 +61,16 @@ def create_app() -> Flask:
                 "id": StrategyType.PROBABILISTIC.value,
                 "label": "Probabilistic",
                 "requires_probability": True,
+            },
+            {
+                "id": StrategyType.TIT_FOR_TAT.value,
+                "label": "Tit for Tat",
+                "requires_probability": False,
+            },
+            {
+                "id": StrategyType.RANDOM.value,
+                "label": "Random",
+                "requires_probability": False,
             },
         ]
         return jsonify({"strategies": data})
@@ -113,14 +125,14 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
 
 def _parse_strategy_config(raw: Dict[str, object], player_index: int) -> StrategyConfig:
     try:
-        strategy_key = str(raw.get("type", "")).lower()
+        strategy_key = str(raw.get("type", "")).strip().lower()
     except Exception as exc:  # pragma: no cover - defensive
         raise SimulationValidationError(f"Invalid strategy for player {player_index}.") from exc
 
-    if strategy_key not in StrategyType._value2member_map_:
-        raise SimulationValidationError(f"Unsupported strategy '{strategy_key}' for player {player_index}.")
-
-    strategy_type = StrategyType(strategy_key)
+    try:
+        strategy_type = resolve_strategy_type(strategy_key)
+    except StrategyLookupError as exc:
+        raise SimulationValidationError(f"Unsupported strategy '{strategy_key}' for player {player_index}.") from exc
     probability = 1.0
 
     if strategy_type is StrategyType.PROBABILISTIC:
