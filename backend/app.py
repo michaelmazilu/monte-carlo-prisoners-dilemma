@@ -19,6 +19,7 @@ from .simulation import (
     SimulationValidationError,
     StrategyConfig,
     StrategyType,
+    PayoffConfig,
     run_simulation,
     resolve_strategy_type,
 )
@@ -113,6 +114,7 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
         rounds = int(payload.get("rounds", 0))
         monte_carlo_runs = int(payload.get("monte_carlo_runs", 1))
         raw_strategies = payload.get("strategies") or []
+        raw_payoffs = payload.get("payoffs") or {}
     except (TypeError, ValueError) as exc:
         raise SimulationValidationError("Invalid numeric parameters.") from exc
 
@@ -120,7 +122,13 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
         raise SimulationValidationError("Two player strategies are required.")
 
     strategies = tuple(_parse_strategy_config(raw, index + 1) for index, raw in enumerate(raw_strategies))
-    return SimulationConfig(rounds=rounds, monte_carlo_runs=monte_carlo_runs, player_strategies=strategies)  # type: ignore[arg-type]
+    payoffs = _parse_payoff_config(raw_payoffs)
+    return SimulationConfig(
+        rounds=rounds,
+        monte_carlo_runs=monte_carlo_runs,
+        player_strategies=strategies,
+        payoffs=payoffs,
+    )
 
 
 def _parse_strategy_config(raw: Dict[str, object], player_index: int) -> StrategyConfig:
@@ -152,6 +160,24 @@ def _parse_strategy_config(raw: Dict[str, object], player_index: int) -> Strateg
             probability /= 100.0
 
     return StrategyConfig(strategy_type=strategy_type, cooperate_probability=probability)
+
+
+def _parse_payoff_config(raw: Dict[str, object]) -> PayoffConfig:
+    if not isinstance(raw, dict):
+        raise SimulationValidationError("Invalid payoffs payload.")
+
+    defaults = PayoffConfig()
+    values = {}
+    for key in ("reward", "temptation", "sucker", "punishment"):
+        if key not in raw:
+            values[key] = getattr(defaults, key)
+            continue
+        try:
+            values[key] = float(raw[key])
+        except (TypeError, ValueError) as exc:
+            raise SimulationValidationError(f"Invalid payoff value for '{key}'.") from exc
+
+    return PayoffConfig(**values)
 
 
 def _format_sse(event: str, payload: Dict[str, object]) -> str:

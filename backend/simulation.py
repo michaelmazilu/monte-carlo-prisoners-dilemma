@@ -10,7 +10,7 @@ through Server-Sent Events.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Generator, Iterable, Tuple
 
@@ -90,12 +90,33 @@ class StrategyConfig:
 
 
 @dataclass(frozen=True)
+class PayoffConfig:
+    """Numerical values that define the payoff matrix."""
+
+    reward: float = 3.0
+    temptation: float = 5.0
+    sucker: float = 0.0
+    punishment: float = 1.0
+
+    def to_tensor(self) -> torch.Tensor:
+        """Return the 2x2 payoff matrix for the configured values."""
+        return torch.tensor(
+            [
+                [[self.reward, self.reward], [self.sucker, self.temptation]],
+                [[self.temptation, self.sucker], [self.punishment, self.punishment]],
+            ],
+            dtype=torch.float32,
+        )
+
+
+@dataclass(frozen=True)
 class SimulationConfig:
     """Complete configuration for a simulation run."""
 
     rounds: int
     monte_carlo_runs: int
     player_strategies: Tuple[StrategyConfig, StrategyConfig]
+    payoffs: PayoffConfig = field(default_factory=PayoffConfig)
 
     def __post_init__(self) -> None:
         if self.rounds <= 0:
@@ -103,15 +124,6 @@ class SimulationConfig:
         if self.monte_carlo_runs <= 0:
             raise SimulationValidationError("Monte Carlo runs must be positive.")
 
-
-# Payoff matrix indexed as payoff[action_player1][action_player2][player_index]
-PAYOFF_MATRIX = torch.tensor(
-    [
-        [[3.0, 3.0], [0.0, 5.0]],  # Player 1 cooperates
-        [[5.0, 0.0], [1.0, 1.0]],  # Player 1 defects
-    ],
-    dtype=torch.float32,
-)
 
 OUTCOME_KEYS = ("CC", "CD", "DC", "DD")
 OUTCOME_INDEX = {
@@ -144,6 +156,7 @@ def run_simulation(
 
     total_rounds = config.rounds
     total_runs = config.monte_carlo_runs
+    payoff_matrix = config.payoffs.to_tensor()
 
     overall_payoff = torch.zeros(2, dtype=torch.float32)
     overall_cooperation_counts = torch.zeros(2, dtype=torch.float32)
@@ -165,7 +178,7 @@ def run_simulation(
                 opponent_previous_action=int(previous_actions[0].item()),
             )
             actions = torch.tensor([action_player1, action_player2], dtype=torch.int64)
-            payoff = PAYOFF_MATRIX[actions[0], actions[1]]
+            payoff = payoff_matrix[actions[0], actions[1]]
             run_payoff += payoff
             run_cooperation_counts += (1 - actions).to(dtype=torch.float32)
             outcome_idx = OUTCOME_INDEX[(int(actions[0].item()), int(actions[1].item()))]
@@ -262,6 +275,12 @@ def run_simulation(
             key: float(overall_outcome_counts[idx].item() / total_rounds_played)
             for idx, key in enumerate(OUTCOME_KEYS)
         },
+        "payoffs": {
+            "reward": float(config.payoffs.reward),
+            "temptation": float(config.payoffs.temptation),
+            "sucker": float(config.payoffs.sucker),
+            "punishment": float(config.payoffs.punishment),
+        },
     }
 
     yield ("summary", final_summary)
@@ -282,5 +301,11 @@ def serialize_config(config: SimulationConfig) -> str:
                 "cooperate_probability": config.player_strategies[1].cooperate_probability,
             },
         ],
+        "payoffs": {
+            "reward": config.payoffs.reward,
+            "temptation": config.payoffs.temptation,
+            "sucker": config.payoffs.sucker,
+            "punishment": config.payoffs.punishment,
+        },
     }
     return json.dumps(data, sort_keys=True)

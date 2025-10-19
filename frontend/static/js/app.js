@@ -14,6 +14,35 @@ const probabilityInputs = {
     player2: document.querySelector('[data-probability-for="player2"]'),
 };
 
+const payoffInputs = {
+    reward: document.getElementById("payoffReward"),
+    temptation: document.getElementById("payoffTemptation"),
+    sucker: document.getElementById("payoffSucker"),
+    punishment: document.getElementById("payoffPunishment"),
+};
+
+const DEFAULT_PAYOFFS = {
+    reward: 3,
+    temptation: 5,
+    sucker: 0,
+    punishment: 1,
+};
+
+const editPayoffsButton = document.getElementById("editPayoffsButton");
+const savePayoffsButton = document.getElementById("savePayoffsButton");
+const cancelPayoffsButton = document.getElementById("cancelPayoffsButton");
+const payoffEditor = document.getElementById("payoffEditor");
+const payoffPreviewFields = Array.from(document.querySelectorAll("[data-payoff-value]"))
+    .reduce((acc, element) => {
+        const key = element.dataset.payoffValue;
+        if (key) {
+            acc[key] = element;
+        }
+        return acc;
+    }, {});
+
+let payoffState = { ...DEFAULT_PAYOFFS };
+
 const PLAYER_KEYS = ["player1", "player2"];
 const PLAYER_COLORS = {
     player1: "#38bdf8",
@@ -32,11 +61,34 @@ document.addEventListener("DOMContentLoaded", () => {
     charts = initialiseCharts();
     updateProbabilityInputs();
     resetPlayerStats();
+    setSummaryPlaceholder();
+    initialisePayoffControls();
 });
 
 Object.values(strategySelects).forEach((select) => {
     select.addEventListener("change", updateProbabilityInputs);
 });
+
+if (editPayoffsButton) {
+    editPayoffsButton.addEventListener("click", () => {
+        openPayoffEditor();
+    });
+}
+
+if (savePayoffsButton) {
+    savePayoffsButton.addEventListener("click", () => {
+        payoffState = readPayoffInputs();
+        updatePayoffPreview();
+        hidePayoffEditor();
+    });
+}
+
+if (cancelPayoffsButton) {
+    cancelPayoffsButton.addEventListener("click", () => {
+        syncPayoffInputsFromState();
+        hidePayoffEditor();
+    });
+}
 
 stopButton.addEventListener("click", () => {
     if (eventSource) {
@@ -59,7 +111,7 @@ form.addEventListener("submit", async (event) => {
     }
 
     resetCharts();
-    summaryContent.innerHTML = "<p>Simulation running… waiting for summary.</p>";
+    setSummaryPlaceholder("Simulation running…");
     setStatus("Preparing simulation…", "info");
     startButton.disabled = true;
     stopButton.disabled = false;
@@ -88,13 +140,12 @@ form.addEventListener("submit", async (event) => {
         startButton.disabled = false;
         stopButton.disabled = true;
         lifecycle.isRunning = false;
-        summaryContent.innerHTML = "<p class=\"error\">Simulation failed to start.</p>";
+        setSummaryPlaceholder("Simulation failed to start.");
     }
 });
 
 function buildSimulationConfig() {
     const rounds = Number.parseInt(form.rounds.value, 10);
-    const monteCarloRuns = Number.parseInt(form.monteCarloRuns.value, 10);
 
     const strategies = PLAYER_KEYS.map((playerKey) => {
         const type = strategySelects[playerKey].value;
@@ -108,9 +159,92 @@ function buildSimulationConfig() {
 
     return {
         rounds,
-        monte_carlo_runs: monteCarloRuns,
+        monte_carlo_runs: 1,
         strategies,
+        payoffs: getPayoffValues(),
     };
+}
+
+function getPayoffValues() {
+    return { ...payoffState };
+}
+
+function initialisePayoffControls() {
+    payoffState = { ...DEFAULT_PAYOFFS };
+    updatePayoffPreview();
+    syncPayoffInputsFromState();
+    hidePayoffEditor();
+}
+
+function openPayoffEditor() {
+    syncPayoffInputsFromState();
+    if (!payoffEditor) {
+        return;
+    }
+    payoffEditor.classList.remove("hidden");
+    payoffEditor.setAttribute("aria-hidden", "false");
+    if (editPayoffsButton) {
+        editPayoffsButton.disabled = true;
+    }
+    const firstInput = payoffInputs.reward;
+    if (firstInput) {
+        firstInput.focus();
+        firstInput.select();
+    }
+}
+
+function hidePayoffEditor() {
+    if (!payoffEditor) {
+        return;
+    }
+    payoffEditor.classList.add("hidden");
+    payoffEditor.setAttribute("aria-hidden", "true");
+    if (editPayoffsButton) {
+        editPayoffsButton.disabled = false;
+    }
+}
+
+function syncPayoffInputsFromState() {
+    Object.entries(payoffInputs).forEach(([key, input]) => {
+        if (input) {
+            input.value = payoffState[key];
+        }
+    });
+}
+
+function readPayoffInputs() {
+    return Object.entries(payoffInputs).reduce((acc, [key, input]) => {
+        acc[key] = parsePayoffInput(key, input);
+        return acc;
+    }, {});
+}
+
+function parsePayoffInput(key, input) {
+    const fallback = payoffState[key] ?? DEFAULT_PAYOFFS[key];
+    if (!input) {
+        return fallback;
+    }
+    const parsed = Number.parseFloat(input.value);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return parsed;
+}
+
+function updatePayoffPreview() {
+    Object.entries(payoffPreviewFields).forEach(([key, element]) => {
+        if (element) {
+            element.textContent = formatPayoffValue(payoffState[key]);
+        }
+    });
+}
+
+function formatPayoffValue(value) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "--";
+    }
+    const fixed = Number.isInteger(value) ? value.toString() : value.toFixed(2);
+    return fixed.replace(/\.0+$/, "");
 }
 
 function startEventStream(simulationId) {
@@ -126,9 +260,10 @@ function startEventStream(simulationId) {
         handleRoundEvent(payload);
     });
 
-    eventSource.addEventListener("run_complete", (event) => {
-        const payload = JSON.parse(event.data);
-        setStatus(`Run ${payload.run} complete.`, "success");
+    eventSource.addEventListener("run_complete", () => {
+        if (!lifecycle.isCompleted) {
+            setStatus("Simulation in progress…", "info");
+        }
     });
 
     eventSource.addEventListener("summary", (event) => {
@@ -162,11 +297,12 @@ function startEventStream(simulationId) {
             eventSource.close();
             eventSource = null;
         }
+        setSummaryPlaceholder("Connection lost.");
     };
 }
 
 function handleRoundEvent(payload) {
-    const label = `Run ${payload.run} · Round ${payload.round}`;
+    const label = `Round ${payload.round}`;
     PLAYER_KEYS.forEach((playerKey) => {
         try {
             const playerCharts = charts[playerKey];
@@ -175,22 +311,20 @@ function handleRoundEvent(payload) {
             }
 
             const totals = payload.total_payoff ?? {};
+            const totalCooperationCounts = payload.cumulative_cooperation ?? {};
             const totalCoins = totals[playerKey];
-            if (typeof totalCoins !== "number") {
-                console.warn(`Missing total coins for ${playerKey}`, payload);
+            const cooperationCount = totalCooperationCounts[playerKey];
+            if (typeof totalCoins !== "number" || typeof cooperationCount !== "number") {
+                console.warn(`Missing totals for ${playerKey}`, payload);
                 return;
             }
-
-            const cooperated = payload.cooperated?.[playerKey] ?? false;
 
             playerCharts.coins.data.labels.push(label);
             playerCharts.coins.data.datasets[0].data.push(totalCoins);
             playerCharts.coins.update("none");
 
             playerCharts.cooperation.data.labels.push(label);
-            playerCharts.cooperation.data.datasets[0].data.push(
-                cooperated ? 1 : 0
-            );
+            playerCharts.cooperation.data.datasets[0].data.push(cooperationCount);
             playerCharts.cooperation.update("none");
 
             updatePlayerStatsDuringRun(playerKey, payload, totalCoins);
@@ -243,20 +377,51 @@ function handleSummaryEvent(payload) {
         );
     });
 
-    summaryContent.innerHTML = `
-        <div class="metric">
-            <span><strong>Runs</strong><br>${payload.runs}</span>
-            <span><strong>Rounds / Run</strong><br>${payload.rounds}</span>
-        </div>
-        <p><strong>Outcome Counts:</strong> CC ${payload.outcome_counts.CC}, CD ${
-        payload.outcome_counts.CD
-    }, DC ${payload.outcome_counts.DC}, DD ${payload.outcome_counts.DD}</p>
-        <p><strong>Outcome Distribution:</strong> CC ${(payload.outcome_distribution.CC * 100).toFixed(
-            1
-        )}%, CD ${(payload.outcome_distribution.CD * 100).toFixed(1)}%, DC ${(
-        payload.outcome_distribution.DC * 100
-    ).toFixed(1)}%, DD ${(payload.outcome_distribution.DD * 100).toFixed(1)}%</p>
-    `;
+    const payoffSummary = payload.payoffs ?? DEFAULT_PAYOFFS;
+
+    summaryContent.innerHTML = [
+        renderSummaryMetric("Rounds", payload.rounds),
+        renderSummaryMetric(
+            "Player 1 Coins",
+            payload.total_payoff.player1.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Player 2 Coins",
+            payload.total_payoff.player2.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Player 1 Avg / Round",
+            payload.average_payoff_per_round.player1.toFixed(3)
+        ),
+        renderSummaryMetric(
+            "Player 2 Avg / Round",
+            payload.average_payoff_per_round.player2.toFixed(3)
+        ),
+        renderSummaryMetric(
+            "Player 1 Coop %",
+            `${(payload.cooperation_rate.player1 * 100).toFixed(1)}%`
+        ),
+        renderSummaryMetric(
+            "Player 2 Coop %",
+            `${(payload.cooperation_rate.player2 * 100).toFixed(1)}%`
+        ),
+        renderSummaryMetric(
+            "Reward (R)",
+            payoffSummary.reward.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Temptation (T)",
+            payoffSummary.temptation.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Sucker (S)",
+            payoffSummary.sucker.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Punishment (P)",
+            payoffSummary.punishment.toFixed(2)
+        ),
+    ].join("");
 }
 
 function resetCharts() {
@@ -275,6 +440,7 @@ function resetCharts() {
     });
 
     resetPlayerStats();
+    setSummaryPlaceholder();
 }
 
 function initialiseCharts() {
@@ -337,15 +503,19 @@ function createCoinsChart(context, color) {
 
 function createCooperationChart(context, color) {
     return new Chart(context, {
-        type: "bar",
+        type: "line",
         data: {
             labels: [],
             datasets: [
                 {
-                    label: "Cooperation",
+                    label: "Total Cooperations",
                     data: [],
+                    borderColor: color,
                     backgroundColor: color,
-                    borderRadius: 6,
+                    tension: 0.25,
+                    fill: false,
+                    pointRadius: 0,
+                    borderWidth: 2,
                 },
             ],
         },
@@ -358,15 +528,13 @@ function createCooperationChart(context, color) {
             scales: {
                 x: {
                     ticks: { color: "#cbd5f5" },
-                    grid: { display: false },
+                    grid: { color: "rgba(148, 163, 184, 0.08)" },
                 },
                 y: {
                     beginAtZero: true,
-                    max: 1,
                     ticks: {
-                        stepSize: 1,
                         color: "#cbd5f5",
-                        callback: (value) => (value === 1 ? "Cooperate" : "Defect"),
+                        callback: (value) => `${value}`,
                     },
                     grid: { color: "rgba(148, 163, 184, 0.12)" },
                 },
@@ -433,7 +601,15 @@ function updateProbabilityInputs() {
     });
 }
 
+function setSummaryPlaceholder(message = "Run a simulation to see results.") {
+    summaryContent.innerHTML = renderSummaryMetric("Status", message);
+}
+
 function setStatus(message, level = "info") {
     statusText.textContent = message;
     statusText.dataset.level = level;
+}
+
+function renderSummaryMetric(label, value) {
+    return `<div class="metric"><span class="metric-label">${label}</span><span class="metric-value">${value}</span></div>`;
 }

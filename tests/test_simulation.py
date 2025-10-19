@@ -7,6 +7,7 @@ from backend.simulation import (
     SimulationValidationError,
     StrategyConfig,
     StrategyType,
+    PayoffConfig,
     run_simulation,
 )
 
@@ -90,6 +91,28 @@ class SimulationConfigTests(unittest.TestCase):
         self.assertEqual(rounds[0]["actions"]["player1"], "C")
         for round_payload in rounds[1:]:
             self.assertEqual(round_payload["actions"]["player1"], "D")
+
+    def test_custom_payoff_values_are_respected(self):
+        payoffs = PayoffConfig(reward=4.0, temptation=9.0, sucker=-2.0, punishment=0.5)
+        config = SimulationConfig(
+            rounds=2,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+            ),
+            payoffs=payoffs,
+        )
+
+        events = list(run_simulation(config))
+        summary = next(payload for event, payload in events if event == "summary")
+        self.assertAlmostEqual(summary["total_payoff"]["player1"], 8.0)
+        self.assertAlmostEqual(summary["total_payoff"]["player2"], 8.0)
+        self.assertIn("payoffs", summary)
+        self.assertAlmostEqual(summary["payoffs"]["reward"], payoffs.reward)
+        self.assertAlmostEqual(summary["payoffs"]["temptation"], payoffs.temptation)
+        self.assertAlmostEqual(summary["payoffs"]["sucker"], payoffs.sucker)
+        self.assertAlmostEqual(summary["payoffs"]["punishment"], payoffs.punishment)
 
 
 if __name__ == "__main__":

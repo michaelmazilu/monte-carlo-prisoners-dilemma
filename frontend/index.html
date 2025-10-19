@@ -22,44 +22,114 @@
     <main class="app-main">
         <section class="controls-bar">
             <form id="simulation-form" class="controls-form">
-                <div class="control-field">
-                    <label for="rounds">Rounds</label>
-                    <input type="number" id="rounds" name="rounds" min="1" value="50" required>
+                <div class="control-section">
+                    <header class="control-section-header">
+                        <h3>Simulation Settings</h3>
+                        <p>Choose how many rounds to simulate in your Monte Carlo run.</p>
+                    </header>
+                    <div class="control-grid">
+                        <div class="control-field">
+                            <label for="rounds">Rounds</label>
+                            <input type="number" id="rounds" name="rounds" min="1" value="50" required>
+                        </div>
+                    </div>
                 </div>
-                <div class="control-field">
-                    <label for="monteCarloRuns">Monte Carlo Runs</label>
-                    <input type="number" id="monteCarloRuns" name="monteCarloRuns" min="1" value="1" required>
+
+                <div class="control-section players-section">
+                    <header class="control-section-header">
+                        <h3>Player Strategies</h3>
+                        <p>Pick behaviours for each prisoner. Probabilistic strategies expose a cooperation slider.</p>
+                    </header>
+                    <div class="player-grid">
+                        <article class="player-config" data-player="player1">
+                            <h4>Player 1</h4>
+                            <div class="control-field">
+                                <label for="player1Strategy">Strategy</label>
+                                <select id="player1Strategy" name="player1Strategy" required>
+                                    <option value="always_cooperate">Always Cooperate</option>
+                                    <option value="always_defect">Always Defect</option>
+                                    <option value="probabilistic">Probabilistic</option>
+                                    <option value="tit_for_tat">Tit for Tat</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="control-field probability-input hidden" data-probability-for="player1">
+                                <label for="player1Probability">Cooperation (%)</label>
+                                <input type="number" id="player1Probability" name="player1Probability" min="0" max="100" value="50">
+                            </div>
+                        </article>
+                        <article class="player-config" data-player="player2">
+                            <h4>Player 2</h4>
+                            <div class="control-field">
+                                <label for="player2Strategy">Strategy</label>
+                                <select id="player2Strategy" name="player2Strategy" required>
+                                    <option value="always_cooperate">Always Cooperate</option>
+                                    <option value="always_defect">Always Defect</option>
+                                    <option value="probabilistic">Probabilistic</option>
+                                    <option value="tit_for_tat">Tit for Tat</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                            <div class="control-field probability-input hidden" data-probability-for="player2">
+                                <label for="player2Probability">Cooperation (%)</label>
+                                <input type="number" id="player2Probability" name="player2Probability" min="0" max="100" value="50">
+                            </div>
+                        </article>
+                    </div>
                 </div>
-                <div class="control-field">
-                    <label for="player1Strategy">Player 1 Strategy</label>
-                    <select id="player1Strategy" name="player1Strategy" required>
-                        <option value="always_cooperate">Always Cooperate</option>
-                        <option value="always_defect">Always Defect</option>
-                        <option value="probabilistic">Probabilistic</option>
-                        <option value="tit_for_tat">Tit for Tat</option>
-                        <option value="random">Random</option>
-                    </select>
+
+                <div class="control-section payoff-section">
+                    <header class="control-section-header">
+                        <h3>Payoff Outcomes</h3>
+                        <p>Fine-tune the reward matrix used for each round of the dilemma.</p>
+                    </header>
+                    <div class="payoff-field">
+                        <div class="payoff-preview" id="payoffPreview">
+                            <span class="preview-chip">
+                                <span class="preview-label">R</span>
+                                <span class="preview-value" data-payoff-value="reward">3</span>
+                            </span>
+                            <span class="preview-chip">
+                                <span class="preview-label">T</span>
+                                <span class="preview-value" data-payoff-value="temptation">5</span>
+                            </span>
+                            <span class="preview-chip">
+                                <span class="preview-label">S</span>
+                                <span class="preview-value" data-payoff-value="sucker">0</span>
+                            </span>
+                            <span class="preview-chip">
+                                <span class="preview-label">P</span>
+                                <span class="preview-value" data-payoff-value="punishment">1</span>
+                            </span>
+                        </div>
+                        <button type="button" id="editPayoffsButton" class="ghost-button">Edit Payoffs</button>
+                        <div class="payoff-editor hidden" id="payoffEditor" aria-hidden="true">
+                            <div class="payoff-input">
+                                <label for="payoffReward">Reward (R)</label>
+                                <input type="number" id="payoffReward" name="payoffReward" step="0.1" value="3">
+                            </div>
+                            <div class="payoff-input">
+                                <label for="payoffTemptation">Temptation (T)</label>
+                                <input type="number" id="payoffTemptation" name="payoffTemptation" step="0.1" value="5">
+                            </div>
+                            <div class="payoff-input">
+                                <label for="payoffSucker">Sucker (S)</label>
+                                <input type="number" id="payoffSucker" name="payoffSucker" step="0.1" value="0">
+                            </div>
+                            <div class="payoff-input">
+                                <label for="payoffPunishment">Punishment (P)</label>
+                                <input type="number" id="payoffPunishment" name="payoffPunishment" step="0.1" value="1">
+                            </div>
+                            <div class="payoff-editor-actions">
+                                <button type="button" id="savePayoffsButton">Save</button>
+                                <button type="button" id="cancelPayoffsButton" class="ghost-button">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="control-field probability-input hidden" data-probability-for="player1">
-                    <label for="player1Probability">Player 1 Cooperation (%)</label>
-                    <input type="number" id="player1Probability" name="player1Probability" min="0" max="100" value="50">
-                </div>
-                <div class="control-field">
-                    <label for="player2Strategy">Player 2 Strategy</label>
-                    <select id="player2Strategy" name="player2Strategy" required>
-                        <option value="always_cooperate">Always Cooperate</option>
-                        <option value="always_defect">Always Defect</option>
-                        <option value="probabilistic">Probabilistic</option>
-                        <option value="tit_for_tat">Tit for Tat</option>
-                        <option value="random">Random</option>
-                    </select>
-                </div>
-                <div class="control-field probability-input hidden" data-probability-for="player2">
-                    <label for="player2Probability">Player 2 Cooperation (%)</label>
-                    <input type="number" id="player2Probability" name="player2Probability" min="0" max="100" value="50">
-                </div>
+
                 <div class="controls-actions">
-                    <button type="submit" id="startButton">Start</button>
+                    <button type="submit" id="startButton">Start Simulation</button>
                     <button type="button" id="stopButton" disabled>Stop</button>
                 </div>
                 <p id="statusText" aria-live="polite"></p>
@@ -70,7 +140,6 @@
             <article class="analytics-card player-card" data-player="player1">
                 <header class="card-header">
                     <h2>Player 1</h2>
-                    <p>Individual performance metrics and trendlines.</p>
                 </header>
                 <div class="player-stats">
                     <div class="stat">
@@ -101,7 +170,6 @@
             <article class="analytics-card player-card" data-player="player2">
                 <header class="card-header">
                     <h2>Player 2</h2>
-                    <p>Individual performance metrics and trendlines.</p>
                 </header>
                 <div class="player-stats">
                     <div class="stat">
@@ -129,15 +197,16 @@
                 </div>
             </article>
 
-            <article class="analytics-card summary-card">
-                <header class="card-header">
+        </section>
+        <section class="summary-bar">
+            <div class="summary-card">
+                <header class="summary-header">
                     <h2>Simulation Summary</h2>
-                    <p>Aggregated results across runs and rounds.</p>
                 </header>
                 <div id="summaryContent" class="summary-body">
                     <p>Run a simulation to view the final statistics.</p>
                 </div>
-            </article>
+            </div>
         </section>
     </main>
 

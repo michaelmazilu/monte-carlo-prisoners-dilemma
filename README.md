@@ -4,7 +4,7 @@ A full-stack MVP for exploring the Prisoner's Dilemma with live visualisations. 
 
 ## Features
 - **Configurable strategies per player:** always cooperate, always defect, probabilistic with custom cooperation rates, Tit for Tat, or Random.
-- **Simulation controls:** choose rounds and optional Monte Carlo runs for aggregated statistics.
+- **Simulation controls:** choose the number of rounds and configure per-player strategies.
 - **Live analytics:** interactive Chart.js visualisations for cumulative payoff, per-round payoff, cooperation rate, and outcome distribution.
 - **Backend streaming:** Flask 3 + PyTorch 2.8 pipeline emitting SSE updates after every round.
 - **Container-ready:** Docker + docker-compose + Nginx reverse proxy for deployment.
