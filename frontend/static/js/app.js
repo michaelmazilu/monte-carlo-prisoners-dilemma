@@ -263,6 +263,11 @@ function startEventStream(simulationId) {
     eventSource = new EventSource(`/api/simulations/${simulationId}/stream`);
     setStatus("Simulation running…", "info");
 
+    eventSource.addEventListener("round_batch", (event) => {
+        const payload = JSON.parse(event.data);
+        handleRoundBatchEvent(payload);
+    });
+
     eventSource.addEventListener("round", (event) => {
         const payload = JSON.parse(event.data);
         handleRoundEvent(payload);
@@ -309,6 +314,13 @@ function startEventStream(simulationId) {
         }
         setSummaryPlaceholder("Connection lost.");
     };
+}
+
+function handleRoundBatchEvent(payload) {
+    const rounds = Array.isArray(payload.rounds) ? payload.rounds : [];
+    rounds.forEach((roundPayload) => {
+        handleRoundEvent(roundPayload);
+    });
 }
 
 function handleRoundEvent(payload) {

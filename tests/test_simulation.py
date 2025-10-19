@@ -39,7 +39,12 @@ class SimulationConfigTests(unittest.TestCase):
         )
 
         events = list(run_simulation(config))
-        round_events = [payload for event, payload in events if event == "round"]
+        round_events = [
+            round_payload
+            for event, payload in events
+            if event == "round_batch"
+            for round_payload in payload["rounds"]
+        ]
         self.assertEqual(len(round_events), 3)
         first_round = round_events[0]
         self.assertIn("cooperated", first_round)
@@ -68,7 +73,12 @@ class SimulationConfigTests(unittest.TestCase):
             ),
         )
 
-        events = [payload for event, payload in run_simulation(config) if event == "round"]
+        events = [
+            round_payload
+            for event, payload in run_simulation(config)
+            if event == "round_batch"
+            for round_payload in payload["rounds"]
+        ]
         actions = [event_payload["actions"]["player1"] for event_payload in events]
         self.assertEqual(actions.count("C"), 4)
         self.assertEqual(actions.count("D"), 1)
@@ -87,7 +97,12 @@ class SimulationConfigTests(unittest.TestCase):
         summary = next(payload for event, payload in events if event == "summary")
         self.assertAlmostEqual(summary["total_payoff"]["player1"], 3.0)
         self.assertAlmostEqual(summary["total_payoff"]["player2"], 8.0)
-        rounds = [payload for event, payload in events if event == "round"]
+        rounds = [
+            round_payload
+            for event, payload in events
+            if event == "round_batch"
+            for round_payload in payload["rounds"]
+        ]
         self.assertEqual(rounds[0]["actions"]["player1"], "C")
         for round_payload in rounds[1:]:
             self.assertEqual(round_payload["actions"]["player1"], "D")
@@ -113,6 +128,24 @@ class SimulationConfigTests(unittest.TestCase):
         self.assertAlmostEqual(summary["payoffs"]["temptation"], payoffs.temptation)
         self.assertAlmostEqual(summary["payoffs"]["sucker"], payoffs.sucker)
         self.assertAlmostEqual(summary["payoffs"]["punishment"], payoffs.punishment)
+
+    def test_round_events_emitted_in_chunks(self):
+        config = SimulationConfig(
+            rounds=5,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+            ),
+            round_event_chunk_size=2,
+        )
+
+        events = list(run_simulation(config))
+        round_batches = [payload["rounds"] for event, payload in events if event == "round_batch"]
+        batch_lengths = [len(batch) for batch in round_batches]
+        self.assertEqual(batch_lengths, [2, 2, 1])
+        summary = next(payload for event, payload in events if event == "summary")
+        self.assertEqual(summary["round_event_chunk_size"], 2)
 
 
 if __name__ == "__main__":

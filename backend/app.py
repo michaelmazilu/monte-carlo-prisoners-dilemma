@@ -20,6 +20,7 @@ from .simulation import (
     StrategyConfig,
     StrategyType,
     PayoffConfig,
+    DEFAULT_ROUND_EVENT_CHUNK_SIZE,
     run_simulation,
     resolve_strategy_type,
 )
@@ -115,6 +116,7 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
         monte_carlo_runs = int(payload.get("monte_carlo_runs", 1))
         raw_strategies = payload.get("strategies") or []
         raw_payoffs = payload.get("payoffs") or {}
+        raw_chunk_size = payload.get("round_event_chunk_size")
     except (TypeError, ValueError) as exc:
         raise SimulationValidationError("Invalid numeric parameters.") from exc
 
@@ -123,11 +125,13 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
 
     strategies = tuple(_parse_strategy_config(raw, index + 1) for index, raw in enumerate(raw_strategies))
     payoffs = _parse_payoff_config(raw_payoffs)
+    chunk_size = _parse_round_chunk_size(raw_chunk_size)
     return SimulationConfig(
         rounds=rounds,
         monte_carlo_runs=monte_carlo_runs,
         player_strategies=strategies,
         payoffs=payoffs,
+        round_event_chunk_size=chunk_size,
     )
 
 
@@ -178,6 +182,16 @@ def _parse_payoff_config(raw: Dict[str, object]) -> PayoffConfig:
             raise SimulationValidationError(f"Invalid payoff value for '{key}'.") from exc
 
     return PayoffConfig(**values)
+
+
+def _parse_round_chunk_size(raw: object) -> int:
+    if raw is None:
+        return DEFAULT_ROUND_EVENT_CHUNK_SIZE
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise SimulationValidationError("Invalid round_event_chunk_size.") from exc
+    return value
 
 
 def _format_sse(event: str, payload: Dict[str, object]) -> str:

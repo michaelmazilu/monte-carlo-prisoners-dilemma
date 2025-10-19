@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Generator, Iterable, Tuple
+from typing import Dict, Generator, List, Tuple
 
 import torch
 
@@ -43,6 +43,9 @@ ALLOWED_STRATEGY_KEYS = {
     StrategyType.RANDOM.value: StrategyType.RANDOM,
     "tit-for-tat": StrategyType.TIT_FOR_TAT,
 }
+
+
+DEFAULT_ROUND_EVENT_CHUNK_SIZE = 64
 
 
 def resolve_strategy_type(key: str) -> StrategyType:
@@ -117,12 +120,15 @@ class SimulationConfig:
     monte_carlo_runs: int
     player_strategies: Tuple[StrategyConfig, StrategyConfig]
     payoffs: PayoffConfig = field(default_factory=PayoffConfig)
+    round_event_chunk_size: int = DEFAULT_ROUND_EVENT_CHUNK_SIZE
 
     def __post_init__(self) -> None:
         if self.rounds <= 0:
             raise SimulationValidationError("Number of rounds must be positive.")
         if self.monte_carlo_runs <= 0:
             raise SimulationValidationError("Monte Carlo runs must be positive.")
+        if self.round_event_chunk_size <= 0:
+            raise SimulationValidationError("Round event chunk size must be positive.")
 
 
 OUTCOME_KEYS = ("CC", "CD", "DC", "DD")
@@ -132,7 +138,6 @@ OUTCOME_INDEX = {
     (1, 0): 2,  # DC
     (1, 1): 3,  # DD
 }
-
 
 def _format_tensor(values: torch.Tensor) -> Tuple[float, ...]:
     """Convert a 1D tensor into a tuple of floats."""
@@ -157,6 +162,7 @@ def run_simulation(
     total_rounds = config.rounds
     total_runs = config.monte_carlo_runs
     payoff_matrix = config.payoffs.to_tensor()
+    chunk_size = config.round_event_chunk_size
 
     overall_payoff = torch.zeros(2, dtype=torch.float32)
     overall_cooperation_counts = torch.zeros(2, dtype=torch.float32)
@@ -167,6 +173,7 @@ def run_simulation(
         run_cooperation_counts = torch.zeros(2, dtype=torch.float32)
         run_outcome_counts = torch.zeros(len(OUTCOME_KEYS), dtype=torch.float32)
         previous_actions = torch.zeros(2, dtype=torch.int64)
+        round_buffer: List[Dict[str, object]] = []
 
         for round_index in range(1, total_rounds + 1):
             action_player1 = config.player_strategies[0].sample_action(
@@ -186,45 +193,50 @@ def run_simulation(
 
             cumulative_round = (run_index - 1) * total_rounds + round_index
             cooperated_flags = (1 - actions).to(dtype=torch.int64)
-            yield (
-                "round",
-                {
-                    "run": run_index,
-                    "round": round_index,
-                    "cumulative_round": cumulative_round,
-                    "actions": {
-                        "player1": "C" if actions[0].item() == 0 else "D",
-                        "player2": "C" if actions[1].item() == 0 else "D",
-                    },
-                    "cooperated": {
-                        "player1": bool(cooperated_flags[0].item()),
-                        "player2": bool(cooperated_flags[1].item()),
-                    },
-                    "cumulative_cooperation": {
-                        "player1": int(run_cooperation_counts[0].item()),
-                        "player2": int(run_cooperation_counts[1].item()),
-                    },
-                    "round_payoff": {
-                        "player1": float(payoff[0].item()),
-                        "player2": float(payoff[1].item()),
-                    },
-                    "total_payoff": {
-                        "player1": float(run_payoff[0].item()),
-                        "player2": float(run_payoff[1].item()),
-                    },
-                    "cooperation_rate": {
-                        "player1": float(run_cooperation_counts[0].item() / round_index),
-                        "player2": float(run_cooperation_counts[1].item() / round_index),
-                    },
-                    "outcome_counts": _format_counts(run_outcome_counts),
+            round_payload = {
+                "run": run_index,
+                "round": round_index,
+                "cumulative_round": cumulative_round,
+                "actions": {
+                    "player1": "C" if actions[0].item() == 0 else "D",
+                    "player2": "C" if actions[1].item() == 0 else "D",
                 },
-            )
+                "cooperated": {
+                    "player1": bool(cooperated_flags[0].item()),
+                    "player2": bool(cooperated_flags[1].item()),
+                },
+                "cumulative_cooperation": {
+                    "player1": int(run_cooperation_counts[0].item()),
+                    "player2": int(run_cooperation_counts[1].item()),
+                },
+                "round_payoff": {
+                    "player1": float(payoff[0].item()),
+                    "player2": float(payoff[1].item()),
+                },
+                "total_payoff": {
+                    "player1": float(run_payoff[0].item()),
+                    "player2": float(run_payoff[1].item()),
+                },
+                "cooperation_rate": {
+                    "player1": float(run_cooperation_counts[0].item() / round_index),
+                    "player2": float(run_cooperation_counts[1].item() / round_index),
+                },
+                "outcome_counts": _format_counts(run_outcome_counts),
+            }
+
+            round_buffer.append(round_payload)
+            if len(round_buffer) >= chunk_size:
+                yield ("round_batch", {"rounds": round_buffer})
+                round_buffer = []
 
             previous_actions = actions
 
         overall_payoff += run_payoff
         overall_cooperation_counts += run_cooperation_counts
         overall_outcome_counts += run_outcome_counts
+
+        if round_buffer:
+            yield ("round_batch", {"rounds": round_buffer})
 
         yield (
             "run_complete",
@@ -281,6 +293,7 @@ def run_simulation(
             "sucker": float(config.payoffs.sucker),
             "punishment": float(config.payoffs.punishment),
         },
+        "round_event_chunk_size": chunk_size,
     }
 
     yield ("summary", final_summary)
@@ -307,5 +320,6 @@ def serialize_config(config: SimulationConfig) -> str:
             "sucker": config.payoffs.sucker,
             "punishment": config.payoffs.punishment,
         },
+        "round_event_chunk_size": config.round_event_chunk_size,
     }
     return json.dumps(data, sort_keys=True)
