@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Dict, Generator, List, Tuple
 
 import torch
+from torch import rand, randint
 
 
 class SimulationValidationError(ValueError):
@@ -84,12 +85,10 @@ class StrategyConfig:
                 return 0
             return int(bool(opponent_previous_action))
         if self.strategy_type is StrategyType.RANDOM:
-            draw = torch.randint(0, 2, (1,), dtype=torch.int64)
-            return int(draw.item())
+            return int(randint(0, 2, (1,), dtype=torch.int64).item())
         # Probabilistic strategy
-        probability = torch.tensor(self.cooperate_probability, dtype=torch.float32)
-        draw = torch.bernoulli(probability).to(dtype=torch.int64)
-        return int(1 - draw.item())  # 0 => cooperate, 1 => defect
+        cooperate = rand(()) < self.cooperate_probability
+        return 0 if bool(cooperate.item()) else 1  # 0 => cooperate, 1 => defect
 
 
 @dataclass(frozen=True)
@@ -172,38 +171,41 @@ def run_simulation(
         run_payoff = torch.zeros(2, dtype=torch.float32)
         run_cooperation_counts = torch.zeros(2, dtype=torch.float32)
         run_outcome_counts = torch.zeros(len(OUTCOME_KEYS), dtype=torch.float32)
-        previous_actions = torch.zeros(2, dtype=torch.int64)
+        previous_actions = (0, 0)
         round_buffer: List[Dict[str, object]] = []
 
         for round_index in range(1, total_rounds + 1):
             action_player1 = config.player_strategies[0].sample_action(
                 round_index=round_index,
-                opponent_previous_action=int(previous_actions[1].item()),
+                opponent_previous_action=previous_actions[1],
             )
             action_player2 = config.player_strategies[1].sample_action(
                 round_index=round_index,
-                opponent_previous_action=int(previous_actions[0].item()),
+                opponent_previous_action=previous_actions[0],
             )
-            actions = torch.tensor([action_player1, action_player2], dtype=torch.int64)
-            payoff = payoff_matrix[actions[0], actions[1]]
-            run_payoff += payoff
-            run_cooperation_counts += (1 - actions).to(dtype=torch.float32)
-            outcome_idx = OUTCOME_INDEX[(int(actions[0].item()), int(actions[1].item()))]
+            payoff = payoff_matrix[action_player1, action_player2]
+            run_payoff[0] += payoff[0]
+            run_payoff[1] += payoff[1]
+            if action_player1 == 0:
+                run_cooperation_counts[0] += 1.0
+            if action_player2 == 0:
+                run_cooperation_counts[1] += 1.0
+            outcome_idx = OUTCOME_INDEX[(action_player1, action_player2)]
             run_outcome_counts[outcome_idx] += 1.0
 
             cumulative_round = (run_index - 1) * total_rounds + round_index
-            cooperated_flags = (1 - actions).to(dtype=torch.int64)
+            cooperated_flags = (action_player1 == 0, action_player2 == 0)
             round_payload = {
                 "run": run_index,
                 "round": round_index,
                 "cumulative_round": cumulative_round,
                 "actions": {
-                    "player1": "C" if actions[0].item() == 0 else "D",
-                    "player2": "C" if actions[1].item() == 0 else "D",
+                    "player1": "C" if action_player1 == 0 else "D",
+                    "player2": "C" if action_player2 == 0 else "D",
                 },
                 "cooperated": {
-                    "player1": bool(cooperated_flags[0].item()),
-                    "player2": bool(cooperated_flags[1].item()),
+                    "player1": bool(cooperated_flags[0]),
+                    "player2": bool(cooperated_flags[1]),
                 },
                 "cumulative_cooperation": {
                     "player1": int(run_cooperation_counts[0].item()),
@@ -229,7 +231,7 @@ def run_simulation(
                 yield ("round_batch", {"rounds": round_buffer})
                 round_buffer = []
 
-            previous_actions = actions
+            previous_actions = (action_player1, action_player2)
 
         overall_payoff += run_payoff
         overall_cooperation_counts += run_cooperation_counts

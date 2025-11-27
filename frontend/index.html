@@ -20,6 +20,68 @@
     </header>
 
     <main class="app-main">
+        <section class="analytics-grid">
+            <article class="analytics-card player-card" data-player="player1">
+                <header class="card-header">
+                    <h2>Player 1</h2>
+                </header>
+                <div class="player-stats">
+                    <div class="stat">
+                        <span class="stat-label">Total Coins</span>
+                        <span class="stat-value" data-player="player1" data-field="totalCoins">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Avg / Round</span>
+                        <span class="stat-value" data-player="player1" data-field="avgPayoff">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Cooperation Rate</span>
+                        <span class="stat-value" data-player="player1" data-field="coopRate">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Total Cooperation</span>
+                        <span class="stat-value" data-player="player1" data-field="totalCooperation">--</span>
+                    </div>
+                </div>
+                <div class="chart-slab">
+                    <canvas id="player1CoinsChart"></canvas>
+                </div>
+                <div class="chart-slab">
+                    <canvas id="player1CooperationChart"></canvas>
+                </div>
+            </article>
+
+            <article class="analytics-card player-card" data-player="player2">
+                <header class="card-header">
+                    <h2>Player 2</h2>
+                </header>
+                <div class="player-stats">
+                    <div class="stat">
+                        <span class="stat-label">Total Coins</span>
+                        <span class="stat-value" data-player="player2" data-field="totalCoins">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Avg / Round</span>
+                        <span class="stat-value" data-player="player2" data-field="avgPayoff">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Cooperation Rate</span>
+                        <span class="stat-value" data-player="player2" data-field="coopRate">--</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Total Cooperation</span>
+                        <span class="stat-value" data-player="player2" data-field="totalCooperation">--</span>
+                    </div>
+                </div>
+                <div class="chart-slab">
+                    <canvas id="player2CoinsChart"></canvas>
+                </div>
+                <div class="chart-slab">
+                    <canvas id="player2CooperationChart"></canvas>
+                </div>
+            </article>
+
+        </section>
         <section class="controls-bar">
             <form id="simulation-form" class="controls-form">
                 <div class="control-section">
@@ -111,69 +173,6 @@
                 </div>
                 <p id="statusText" aria-live="polite"></p>
             </form>
-        </section>
-
-        <section class="analytics-grid">
-            <article class="analytics-card player-card" data-player="player1">
-                <header class="card-header">
-                    <h2>Player 1</h2>
-                </header>
-                <div class="player-stats">
-                    <div class="stat">
-                        <span class="stat-label">Total Coins</span>
-                        <span class="stat-value" data-player="player1" data-field="totalCoins">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Avg / Round</span>
-                        <span class="stat-value" data-player="player1" data-field="avgPayoff">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Cooperation Rate</span>
-                        <span class="stat-value" data-player="player1" data-field="coopRate">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Total Cooperation</span>
-                        <span class="stat-value" data-player="player1" data-field="totalCooperation">--</span>
-                    </div>
-                </div>
-                <div class="chart-slab">
-                    <canvas id="player1CoinsChart"></canvas>
-                </div>
-                <div class="chart-slab">
-                    <canvas id="player1CooperationChart"></canvas>
-                </div>
-            </article>
-
-            <article class="analytics-card player-card" data-player="player2">
-                <header class="card-header">
-                    <h2>Player 2</h2>
-                </header>
-                <div class="player-stats">
-                    <div class="stat">
-                        <span class="stat-label">Total Coins</span>
-                        <span class="stat-value" data-player="player2" data-field="totalCoins">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Avg / Round</span>
-                        <span class="stat-value" data-player="player2" data-field="avgPayoff">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Cooperation Rate</span>
-                        <span class="stat-value" data-player="player2" data-field="coopRate">--</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-label">Total Cooperation</span>
-                        <span class="stat-value" data-player="player2" data-field="totalCooperation">--</span>
-                    </div>
-                </div>
-                <div class="chart-slab">
-                    <canvas id="player2CoinsChart"></canvas>
-                </div>
-                <div class="chart-slab">
-                    <canvas id="player2CooperationChart"></canvas>
-                </div>
-            </article>
-
         </section>
         <section class="summary-bar">
             <div class="summary-card">

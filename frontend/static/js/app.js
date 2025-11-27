@@ -29,7 +29,7 @@ const DEFAULT_PAYOFFS = {
 };
 
 const CHART_UPDATE_INTERVAL = 25;
-const MAX_CHART_POINTS = 2000;
+const MAX_CHART_POINTS = Infinity;
 
 let payoffState = { ...DEFAULT_PAYOFFS };
 
