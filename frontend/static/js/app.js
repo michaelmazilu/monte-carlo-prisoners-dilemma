@@ -3,6 +3,7 @@ const startButton = document.getElementById("startButton");
 const stopButton = document.getElementById("stopButton");
 const statusText = document.getElementById("statusText");
 const summaryContent = document.getElementById("summaryContent");
+const noiseInput = document.getElementById("noiseRate");
 
 const strategySelects = {
     player1: document.getElementById("player1Strategy"),
@@ -133,11 +134,15 @@ function buildSimulationConfig() {
         return result;
     });
 
+    const noiseRateRaw = noiseInput ? Number.parseFloat(noiseInput.value) : 0;
+    const noise_rate = Number.isFinite(noiseRateRaw) ? noiseRateRaw : 0;
+
     return {
         rounds,
         monte_carlo_runs: 1,
         strategies,
         payoffs: getPayoffValues(),
+        noise_rate,
     };
 }
 
@@ -421,6 +426,10 @@ function handleSummaryEvent(payload) {
         renderSummaryMetric(
             "Punishment (P)",
             payoffSummary.punishment.toFixed(2)
+        ),
+        renderSummaryMetric(
+            "Noise (mis-exec)",
+            `${((payload.noise_rate ?? 0) * 100).toFixed(1)}%`
         ),
     ].join("");
 }

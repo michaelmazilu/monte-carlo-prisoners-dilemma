@@ -117,6 +117,7 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
         raw_strategies = payload.get("strategies") or []
         raw_payoffs = payload.get("payoffs") or {}
         raw_chunk_size = payload.get("round_event_chunk_size")
+        raw_noise_rate = payload.get("noise_rate")
     except (TypeError, ValueError) as exc:
         raise SimulationValidationError("Invalid numeric parameters.") from exc
 
@@ -126,11 +127,13 @@ def _parse_simulation_config(payload: Dict[str, object]) -> SimulationConfig:
     strategies = tuple(_parse_strategy_config(raw, index + 1) for index, raw in enumerate(raw_strategies))
     payoffs = _parse_payoff_config(raw_payoffs)
     chunk_size = _parse_round_chunk_size(raw_chunk_size)
+    noise_rate = _parse_noise_rate(raw_noise_rate)
     return SimulationConfig(
         rounds=rounds,
         monte_carlo_runs=monte_carlo_runs,
         player_strategies=strategies,
         payoffs=payoffs,
+        noise_rate=noise_rate,
         round_event_chunk_size=chunk_size,
     )
 
@@ -191,6 +194,20 @@ def _parse_round_chunk_size(raw: object) -> int:
         value = int(raw)
     except (TypeError, ValueError) as exc:
         raise SimulationValidationError("Invalid round_event_chunk_size.") from exc
+    return value
+
+
+def _parse_noise_rate(raw: object) -> float:
+    if raw is None:
+        return 0.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise SimulationValidationError("Invalid noise_rate.") from exc
+    if value > 1.0:
+        value /= 100.0
+    if not 0.0 <= value <= 1.0:
+        raise SimulationValidationError("noise_rate must be between 0 and 1.")
     return value
 
 

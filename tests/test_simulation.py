@@ -147,6 +147,43 @@ class SimulationConfigTests(unittest.TestCase):
         summary = next(payload for event, payload in events if event == "summary")
         self.assertEqual(summary["round_event_chunk_size"], 2)
 
+    def test_noise_rate_validation(self):
+        with self.assertRaises(SimulationValidationError):
+            SimulationConfig(
+                rounds=3,
+                monte_carlo_runs=1,
+                player_strategies=(
+                    StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                    StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                ),
+                noise_rate=1.5,
+            )
+
+    def test_noise_flips_actions_when_enabled(self):
+        config = SimulationConfig(
+            rounds=3,
+            monte_carlo_runs=1,
+            player_strategies=(
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+                StrategyConfig(StrategyType.ALWAYS_COOPERATE),
+            ),
+            noise_rate=1.0,
+        )
+
+        events = list(run_simulation(config))
+        round_events = [
+            round_payload
+            for event, payload in events
+            if event == "round_batch"
+            for round_payload in payload["rounds"]
+        ]
+        self.assertTrue(all(round_payload["actions"]["player1"] == "D" for round_payload in round_events))
+        self.assertTrue(all(round_payload["actions"]["player2"] == "D" for round_payload in round_events))
+        summary = next(payload for event, payload in events if event == "summary")
+        self.assertAlmostEqual(summary["total_payoff"]["player1"], 3.0)
+        self.assertEqual(summary["total_cooperation"]["player1"], 0)
+        self.assertAlmostEqual(summary["noise_rate"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

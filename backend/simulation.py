@@ -119,6 +119,7 @@ class SimulationConfig:
     monte_carlo_runs: int
     player_strategies: Tuple[StrategyConfig, StrategyConfig]
     payoffs: PayoffConfig = field(default_factory=PayoffConfig)
+    noise_rate: float = 0.0
     round_event_chunk_size: int = DEFAULT_ROUND_EVENT_CHUNK_SIZE
 
     def __post_init__(self) -> None:
@@ -126,6 +127,8 @@ class SimulationConfig:
             raise SimulationValidationError("Number of rounds must be positive.")
         if self.monte_carlo_runs <= 0:
             raise SimulationValidationError("Monte Carlo runs must be positive.")
+        if not 0.0 <= self.noise_rate <= 1.0:
+            raise SimulationValidationError("Noise rate must be between 0 and 1.")
         if self.round_event_chunk_size <= 0:
             raise SimulationValidationError("Round event chunk size must be positive.")
 
@@ -148,6 +151,16 @@ def _format_counts(counts: torch.Tensor) -> Dict[str, int]:
     return {key: int(counts[idx].item()) for idx, key in enumerate(OUTCOME_KEYS)}
 
 
+def _apply_noise(action: int, noise_rate: float) -> int:
+    """Flip an intended action with probability `noise_rate` to model mis-execution."""
+    if noise_rate <= 0.0:
+        return action
+    flip = rand(()) < noise_rate
+    if bool(flip.item()):
+        return 1 - action
+    return action
+
+
 def run_simulation(
     config: SimulationConfig,
 ) -> Generator[Tuple[str, Dict[str, object]], None, None]:
@@ -162,6 +175,7 @@ def run_simulation(
     total_runs = config.monte_carlo_runs
     payoff_matrix = config.payoffs.to_tensor()
     chunk_size = config.round_event_chunk_size
+    noise_rate = float(config.noise_rate)
 
     overall_payoff = torch.zeros(2, dtype=torch.float32)
     overall_cooperation_counts = torch.zeros(2, dtype=torch.float32)
@@ -175,14 +189,17 @@ def run_simulation(
         round_buffer: List[Dict[str, object]] = []
 
         for round_index in range(1, total_rounds + 1):
-            action_player1 = config.player_strategies[0].sample_action(
+            intended_action_player1 = config.player_strategies[0].sample_action(
                 round_index=round_index,
                 opponent_previous_action=previous_actions[1],
             )
-            action_player2 = config.player_strategies[1].sample_action(
+            intended_action_player2 = config.player_strategies[1].sample_action(
                 round_index=round_index,
                 opponent_previous_action=previous_actions[0],
             )
+            action_player1 = _apply_noise(intended_action_player1, noise_rate)
+            action_player2 = _apply_noise(intended_action_player2, noise_rate)
+
             payoff = payoff_matrix[action_player1, action_player2]
             run_payoff[0] += payoff[0]
             run_payoff[1] += payoff[1]
@@ -202,6 +219,10 @@ def run_simulation(
                 "actions": {
                     "player1": "C" if action_player1 == 0 else "D",
                     "player2": "C" if action_player2 == 0 else "D",
+                },
+                "intended_actions": {
+                    "player1": "C" if intended_action_player1 == 0 else "D",
+                    "player2": "C" if intended_action_player2 == 0 else "D",
                 },
                 "cooperated": {
                     "player1": bool(cooperated_flags[0]),
@@ -295,6 +316,7 @@ def run_simulation(
             "sucker": float(config.payoffs.sucker),
             "punishment": float(config.payoffs.punishment),
         },
+        "noise_rate": noise_rate,
         "round_event_chunk_size": chunk_size,
     }
 
@@ -322,6 +344,7 @@ def serialize_config(config: SimulationConfig) -> str:
             "sucker": config.payoffs.sucker,
             "punishment": config.payoffs.punishment,
         },
+        "noise_rate": config.noise_rate,
         "round_event_chunk_size": config.round_event_chunk_size,
     }
     return json.dumps(data, sort_keys=True)
